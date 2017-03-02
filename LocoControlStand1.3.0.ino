@@ -4,7 +4,7 @@
       #define VERSION "1.3.0"
 /*                                                 **
 **  Written by Chris Draper                        **
-**  Copyright (c) 2016                             **
+**  Copyright (c) 2016 - 2017                      **
 **                                                 **
 *****************************************************
 **
@@ -131,7 +131,6 @@
 //General Globals
 
 bool gInitialized       = false;
-//bool gNoMotorComms      = false;
 bool gRaspiOK           = false; 
 bool gControlsChanged   = false;
 int  gControlStatus     = 0;
@@ -268,15 +267,16 @@ void EvaluateState(void)
       {
         CalcControlStatus(STATUS_DYNAMIC, "Dyn Brake ON");  
         //todo - flesh out dynamic once throttle debugged
-        //when dynamic advanced - gradually increase permitted amperage. momentum = set value from pot.
-        //when dynamic reduced - gradually decrease permitted amperage. momentum = max
+        //when dynamic advanced - gradually increase permitted regen amperage. momentum = set value from pot.
+        //when dynamic reduced - gradually decrease permitted regen amperage. momentum = max
       }
       else if (gThrottleNotch > 0)
       {
         CalcControlStatus(STATUS_POWER, "Throttle ON");
-        //todo - when throttle advanced - set max permitted amperage. momentum = set value from pot
-        //when throttle reduced - minimise amperage. momentum=max
-        //scale notch to an actual speed setting, set them in gMotorSpeed and issue the commands
+        //todo - In Dynamic mode - when throttle advanced - momentum = set value from pot
+        //when throttle reduced - keep 'speed up to within -2 amps to 0 amps. momentum=max
+        
+		//scale notch to an actual speed setting, set them in gMotorSpeed and issue the commands
         SetMotorSpeed(gThrottleNotch);
       } 
     }
@@ -430,7 +430,10 @@ void SetMotorSpeed(int Notch)
     
     Serial.print(F("L:4:Motor set to "));
     Serial.println(speed);
-
+	
+	SendSoundCommand("T");
+	SendSoundCommand('0' + Notch);
+	
 	//send the commands to the motor controllers
 	
 	gSabertooth[0].motor(1, speed);     //first pair
