@@ -1,7 +1,7 @@
 /****************************************************
 **                                                 **
 **  Loco Control Stand version                     **/
-      #define VERSION "1.3.0"
+      #define VERSION "2.0.0"
 /*                                                 **
 **  Written by Chris Draper                        **
 **  Copyright (c) 2016                             **
@@ -38,12 +38,8 @@
 
  //general constants
  
- const int LOG_LEVEL = 4;	//change at compile time to remove debug info from screen
-                          //priority 1 = cant run until corrected
-                          //priority 2 = serious but can run
-                          //priority 3 = informational
-                          //priority 4 = debug info, not needed in normal operation
-
+ //#define LOG_LEVEL_4			//if defined then debug info will be output to the raspi
+ 
  
  #define SERIAL_SPEED	9600      //9600 for slower testing 
  #define SERIAL_BUFSIZE	50		  //Reserve 50 bytes for sending and receiving messages with the raspi
@@ -69,8 +65,6 @@
  const int DIR_FWD = 1;
  const int DIR_REV = 2;
  
- //Sabertooth configuration defines
- #define MOTOR_NOTCH      255            //the maximum value we can send for throttle or dynamic brake per notch position - 1
 
  //Sabertooth ports for ditch lights and headlights
  //TODO - fix this for healights dim, high and ditchlights flashing for horn
@@ -131,14 +125,15 @@
 //General Globals
 
 bool gInitialized       = false;
-//bool gNoMotorComms      = false;
 bool gRaspiOK           = false; 
 bool gControlsChanged   = false;
 int  gControlStatus     = 0;
 
 //Control Inputs
 int  gThrottleNotch     = 0;
+int  gThrottleVal		    = 0;
 int  gDynamicNotch      = 0;
+int	 gDynamicVal		    = 0;
 int  gDirection         = 0;
 int  gMomentum          = 0;
 int  gBattery           = 0;
@@ -235,12 +230,14 @@ void ReadInputs(void)
   CheckHorn();                      //if horn is pressed, then sound it. if released, then tell raspi
   
   if(digitalRead(BTN_VIGILANCE))    //Hitting vigilance button is considered a control change
-    ResetVigilanceWarning();        //But should not set the controls changed flag - just reset vigilance
- 
+  {
+    Serial.println(F("L:2:Vigilance Manual Reset"));
+	ResetVigilanceWarning();        //Just reset vigilance - not a control 'change'
+  }
   if(rtnval)	 
   {
-    //todo - need to evaluate any control errors that arise during running
-    // set gcontrols changed back to false if we are waiting for a correction. Failsafe called if real problem
+    //todo - can evaluate any control errors here - that arise during running
+    // if you so choose
   }
 }
 
@@ -251,14 +248,16 @@ void EvaluateState(void)
   if(gControlStatus == STATUS_ERROR)
   {
     //todo - ensure we are in a safe state and stay there until the error clears
-    Serial.println(F("L:4:EvalutateState Error Condition Detected"));
+    Serial.println(F("L:1:EvalutateState Error Condition Detected"));
   }
   else
   {
     if((gThrottleNotch == 0) && (gDynamicNotch == 0))
     {
-      CalcControlStatus(STATUS_IDLE,"Idle");
-      SetMotorSpeed(0);
+        CalcControlStatus(STATUS_IDLE,"Idle");
+        gThrottleNotch = 0;
+        gThrottleVal = 0;
+        SetMotorSpeed();
     }
     else if(gDirection != DIR_NONE)
     {
@@ -267,17 +266,20 @@ void EvaluateState(void)
       if(gDynamicNotch > 0)
       {
         CalcControlStatus(STATUS_DYNAMIC, "Dyn Brake ON");  
-        //todo - flesh out dynamic once throttle debugged
-        //when dynamic advanced - gradually increase permitted amperage. momentum = set value from pot.
-        //when dynamic reduced - gradually decrease permitted amperage. momentum = max
+        //todo - flesh out dynamic once throttle fully debugged
+ 
+ 		    Serial.println(F("S:"));
+		    Serial.print(gDynamicNotch);
+
       }
       else if (gThrottleNotch > 0)
       {
         CalcControlStatus(STATUS_POWER, "Throttle ON");
-        //todo - when throttle advanced - set max permitted amperage. momentum = set value from pot
-        //when throttle reduced - minimise amperage. momentum=max
-        //scale notch to an actual speed setting, set them in gMotorSpeed and issue the commands
-        SetMotorSpeed(gThrottleNotch);
+			//Send Sound Command 
+		    Serial.println(F("S:"));
+		    Serial.print(gThrottleNotch);
+
+        SetMotorSpeed();
       } 
     }
   }
@@ -300,23 +302,21 @@ void CalcControlStatus(const int NewStatus, const char* Msg)
     {
         if(NewStatus == STATUS_ERROR || gControlStatus == STATUS_ERROR)
         {
-            Serial.print(F("L:1:Critical Error. "));    //print the error heading
+            Serial.print(F("L:1:Critical Error. Enable log level 4 to debug"));    //print the error heading
         }
-        else
-        {
-        Serial.print(F("L:4:"));      //print the normal heading
-        }      
-
-        //print the rest of the message for either case
-    
-        Serial.print(F("Status was "));
-        Serial.print(gControlStatus);
-        Serial.print(F(" now "));
-        Serial.print(NewStatus);
-        Serial.print(F(" : "));
-        Serial.println(Msg);              //print the passed message
 
         gControlStatus = NewStatus;       //set the new status
+
+		//Send the proper Sound System status command
+		if (NewStatus == STATUS_POWER)
+			Serial.println(F("S:T:"));
+		
+		if (NewStatus == STATUS_DYNAMIC)
+			Serial.println(F("S:D:"));
+		
+		if (NewStatus == STATUS_IDLE)
+			Serial.println(F("S:0:"));
+		
   }
 }
 
@@ -346,7 +346,7 @@ void CalcMomentum(void)
     //read it and double it. Arduino range is roughly half that of the sabertooth.
     int newval = analogRead(MOMENTUM_PIN)*2;
     
-    //limitcheck the value to fit ramping range before comparing it to last setting/using it
+    //limit-check the value to fit ramping range before comparing it to last setting/using it
     if(newval > 2046) newval = 2046;
     if(newval < 0) newval = 0;
     
@@ -385,7 +385,7 @@ void DoTimedIntervalChecks(void)
     }
     if(callcount++ > 6)    //stuff that can be done every 30 seconds
     {
-        GetTemperature();         //get and send to the raspi
+       // GetTemperature();         //TODO - keep? get and send to the raspi
         CalcMomentum();
         callcount = 0;
     }
@@ -400,13 +400,13 @@ void DoTimedIntervalChecks(void)
     {
         if(gVigilanceCount++ > 6)   //more than 30 seconds since a control was touched
         {
-            Serial.println(F("L:4:Vigilance Light"));
+            Serial.println(F("L:2:Vigilance Light Triggered"));
             SetVigilanceWarning(false);
         }
     
         if(gVigilanceCount > 8)   //light been on for at least 10 seconds
         {
-            Serial.println(F("L:4:Vigilance Buzzer"));
+            Serial.println(F("L:2:Vigilance Buzzer Triggered"));
           	SetVigilanceWarning(true);   //buzzer goes off 10 seconds later
         }
         
@@ -421,16 +421,13 @@ void DoTimedIntervalChecks(void)
 //Output setting routines
 //***************************************************
 
-void SetMotorSpeed(int Notch)
+void SetMotorSpeed()
 {
 	
-    int speed = MOTOR_NOTCH * Notch;        //used to scale the provided notch to a speed setting the controller understands (-2047-0-2047 range)
+    int speed = gThrottleVal;       //Motors run on (-2047-0-2047 range)
     
     if(gDirection == DIR_REV)  speed = -speed;                     //a negative number makes the motor go in reverse, positive = go forward
     
-    Serial.print(F("L:4:Motor set to "));
-    Serial.println(speed);
-
 	//send the commands to the motor controllers
 	
 	gSabertooth[0].motor(1, speed);     //first pair
@@ -439,21 +436,17 @@ void SetMotorSpeed(int Notch)
 	gSabertooth[1].motor(2, speed);
 	gSabertooth[2].motor(1, speed);     //3rd pair
 	gSabertooth[2].motor(2, speed);
-
 }
 
 //***************************************************
 
-void SetDynamicBrake(int Notch)
+void SetDynamicBrake()
 {
 	
-    int brake = (8-MOTOR_NOTCH) * Notch;            //used to scale the provided notch to a speed setting the controller understands (-2047-0-2047 range)
+    int brake = gDynamicVal;					  //Motor understands (-2047-0-2047 range)
                                                   //Note the notch is inverted so most gentle braking is on Notch one
     if(gDirection == DIR_REV)  brake = -brake;      //a negative number makes the motor go in reverse, positive = go forward
                                                   //Note this must stay in the same direction of travel for Sabertooth braking to work properly
-    Serial.print(F("L:4:D Brake set to "));
-    Serial.println(brake);
-
 	//send the commands to the motor controllers
 	
 	gSabertooth[0].motor(1, brake);     //first pair
@@ -505,7 +498,7 @@ void CheckHeadlights(void)
     if(gHeadlights != state)
     {
         
-        Serial.print(F("L:4:Headlights now "));
+        Serial.print(F("L:2:Headlights now "));
         Serial.println(state);
         gHeadlights = state;
         
@@ -552,9 +545,7 @@ void CheckHorn(void)
 	//Set the horn to match the button state.
 	if(HornState == 0 && gHorn == 0)			//Horn button pressed, we have not seen this yet
 	{
-    Serial.println(F("L:4:Horn"));
-
-		SendSoundCommand("H");
+		Serial.println(F("S:H:"));
 		gHorn = 1;
     //todo - set ditchlights flashing for ten seconds
 		ResetVigilanceWarning();		//horn press also resets the vigilance timer.
@@ -562,7 +553,7 @@ void CheckHorn(void)
 	}	
 	else if(HornState == 1 && gHorn == 1)		//Horn button released, we have not seen this yet
 	{
-		SendSoundCommand("J");
+		Serial.println(F("S:J:"));
 		gHorn = 0;
 	}
 }
@@ -584,7 +575,6 @@ void ResetVigilanceWarning(void)
 {
     //Reset Vigilance buzzer and light the vigilance LED
 
-	Serial.println(F("L:4:Vigilance Reset"));
 	digitalWrite(VIGILANCE_EN,LOW);
 	digitalWrite(BUZZER_PIN,LOW);
     gVigilanceCount = 0;
@@ -621,7 +611,7 @@ void GetMotorCurrent()
     }
 
     //log the retrieved value or calculated total
-    Serial.print(F("L:3:Motor Amps"));
+    Serial.print(F("M:"));
     Serial.print(Motor);
     Serial.print(":");
     Serial.println(gMotorCurrent[0]);
@@ -661,8 +651,7 @@ void GetTemperature(void)
     
     //Gets temps on cycle - for driver one and two first time, then three and four on second run etc.
     
-   //check and process timeout only on first call
-    
+   //check and process timeout only on first call    
     Serial.print(F("L:3: Temperature Data:"));
     Serial.print(driver);
     Serial.print(":");
@@ -706,40 +695,40 @@ int GetDirection(void)
     {
         gDirection = DIR_FWD;    //We are going forward
         gControlsChanged = true;
-        Serial.println(F("L:4:Dir FWD"));
+        Serial.println(F("S:F:"));
     }
     else if((digitalRead(PIN_DIR_FWD) == HIGH)  && (gDirection == DIR_NONE) && (digitalRead(PIN_DIR_REV) == LOW))
     {
         gDirection = DIR_REV;    //We are going reverse
         gControlsChanged = true;
-        Serial.println(F("L:4:Dir REV"));
+        Serial.println(F("S:R:Dir REV"));
     }
     else if((digitalRead(PIN_DIR_FWD) == HIGH)&& (gDirection != DIR_NONE) && (digitalRead(PIN_DIR_REV) == HIGH))
     {
         gControlsChanged = true;
         gDirection = DIR_NONE;   //We are in Neutral
-        Serial.println(F("L:4:Dir NONE"));
+        Serial.println(F("S:N:"));
     }
     
     //otherwise business as usual - no change needed - move on through
     return 0;
 }
 
-
 //***************************************************
 int GetDynamic(void)
 {
     //read the raw analog value and calculate the corresponding notch
-    int newval = CalcNotch(analogRead(DYNAMIC_PIN));
+    gDynamicVal = analogRead(DYNAMIC_PIN);
+	 int newval = CalcNotch(gDynamicVal);
     
     if(gDynamicNotch != newval)
     {
         //by evaluating at notch level - we remove a lot of jitter automatically
         gControlsChanged = true;
-        
+ #ifdef LOG_LEVEL_4
         Serial.print(F("L:4:Dynamic Notch now "));
         Serial.println(newval);
-        
+ #endif 
         if(gDirection == DIR_NONE && newval > 0)
         {
             CalcControlStatus(STATUS_ERROR,"ERROR: Dynamic Brake Set. Reverser Neutral");
@@ -758,7 +747,9 @@ int GetThrottle(void)
 {
 
     //read the raw analog value and calculate the corresponding notch
-    int newval = CalcNotch(analogRead(THROTTLE_PIN));
+    gThrottleVal = analogRead(THROTTLE_PIN);
+	
+	int newval = CalcNotch(gThrottleVal);
     
     if(gThrottleNotch != newval)
     {
@@ -804,17 +795,8 @@ void ConfigComms(void)
     gSabertooth[2].setGetTimeout(1000);
     
     //Announce Our arrival
-
-    Serial.println(" ");
-    Serial.println("************************************");
-    Serial.println(" ");
-    
     Serial.print(F("L:2:Loco Control Stand Version: "));
-    Serial.print(F(VERSION));
-    Serial.println(" ");
-    Serial.println("************************************");
-    Serial.println(" ");
- 
+    Serial.print(F(VERSION)); 
 }
 
 //***************************************************
@@ -880,18 +862,12 @@ void serialEvent()
 //***************************************************
 void SendCommsHeartbeat(void)
 {
+#ifdef LOG_LEVEL_4
   Serial.println(F("L:4:Heartbeat"));
+#endif
   gSabertooth[0].keepAlive();
   gSabertooth[1].keepAlive();
   gSabertooth[2].keepAlive();
-}
-
-//***************************************************
-void SendSoundCommand(const char* SoundCommand)
-{
-
-	Serial.print("S:");				// 'S:' = Sound Command - to differentiate from all the error and log messages which are prefixed with L:
-	Serial.println(SoundCommand);
 }
 
 //***************************************************
@@ -973,7 +949,9 @@ void TestSystem(void)
 	//Only one controller present is valid to continue
 
     gThrottleNotch = 0;
-    SetMotorSpeed(0);                   //Force all motors to stop - issue commands before checking controllers are there for safety.
+    gThrottleVal = 0;
+
+    SetMotorSpeed();                   //Force all motors to stop - issue commands before checking controllers are there for safety.
 
 //	if (TestMotorControllers())
 //	{
