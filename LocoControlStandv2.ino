@@ -211,9 +211,9 @@ void loop()
                                     //and issue commands based on the changed controls - and also keep-alive heartbeats
 	} 
 
-  ServiceComms();                   // Comms Housekeeping route - handles reception of messages from Raspi etc
+    ServiceComms();                   // Comms Housekeeping route - handles reception of messages from Raspi etc
   
-  gtimer.run();                     //must be in main loop for timer to work
+    gtimer.run();                     //must be in main loop for timer to work
   
 }
 
@@ -540,20 +540,27 @@ void SetSpeedo(int speed)
 
 void CheckHorn(void)
 {	
-    int HornState = digitalRead(BTN_HORN);
-  
-	//Set the horn to match the button state.
-	if(HornState == 0 && gHorn == 0)			//Horn button pressed, we have not seen this yet
+
+	 int newval[3]; 
+     
+     newval[0] = digitalRead(BTN_HORN);
+     delay(10);
+     newval[1] = digitalRead(BTN_HORN);
+     delay(10);
+     newval[2] = digitalRead(BTN_HORN);
+     
+ 	//Set the horn to match the button state.
+	if(newval[0] == 0 && newval[1] == 0 && newval[2] == 0 && gHorn == 0)	//Horn button pressed, we have not seen this yet
 	{
 		Serial.println(F("S:h:"));
 		gHorn = 1;
         
-    //todo - set ditchlights flashing for ten seconds
+    //todo - set ditch-lights flashing for ten seconds
 		
         ResetVigilanceWarning();		//horn press also resets the vigilance timer.
 
 	}	
-	else if(HornState == 1 && gHorn == 1)		//Horn button released, we have not seen this yet
+	else if(newval[0] == 1 && newval[1] == 1 && newval[2] == 1 && gHorn == 1)		//Horn button released, we have not seen this yet
 	{
 		Serial.println(F("S:j:"));
 		gHorn = 0;
@@ -719,21 +726,57 @@ int GetDirection(void)
 int GetDynamic(void)
 {
     //read the raw analog value and calculate the corresponding notch
+    /*NOTE: debouncing is somewhat complicated for a deliberate reason:-
+     when the lever is advanced several notches over a couple of seconds, we only
+     want to know when it has stopped moving. this is to give the motor controllers and sound system a solid
+     starting point and ending point for multi-notch Dyn braking changes
+    */
 
-	 int newval = CalcNotch( analogRead(DYNAMIC_PIN));
-    
-    if(gDynamicNotch != newval)
+    static int newval[3] = {0,0,0}; 
+     static int idx = 0;
+     
+     switch(idx)
+     {
+         case 0:
+            newval[0] = analogRead(DYNAMIC_PIN);           //take first analog sample
+            newval[1] = 0;
+            newval[2] = 0;
+            idx++;
+            return 0;
+            
+         case 1:
+            newval[1] = analogRead(DYNAMIC_PIN);           //take second analog sample
+            if(newval[0] != newval[1])
+                idx = 0;                            //we are in the middle of a change so reset for three new samples
+            else
+                idx++;                              //1st two analog samples match, so advance ready for third
+            return 0;
+                        
+         case 2:
+            newval[2] = analogRead(DYNAMIC_PIN);
+            idx = 0;                                //completed 3 samples. start again either way
+            if(newval[0] != newval[1] || newval[1] != newval[2])
+            {
+                return 0;                            //Still in the middle of a change so reset for three new samples
+            }
+            break;
+     }
+
+     newval[0] = CalcNotch(newval[0]);              //success to get here - three analogs match, not make it a notch
+ 	 
+   
+    if(gDynamicNotch != newval[0])
     {
-        //by evaluating at notch level - we remove a lot of jitter automatically
-        gControlsChanged = true;
+        //value has to have changed, and be measured as identical analog values three times to get here     
+         gControlsChanged = true;
 
-        if(gDirection == DIR_NONE && newval > 0)
+        if(gDirection == DIR_NONE && newval[1] > 0)
         {
             CalcControlStatus(STATUS_ERROR,"ERROR: Dynamic Brake Set. Reverser Neutral");
             return 1;
         }
         
-        gDynamicNotch = newval;
+        gDynamicNotch = newval[0];
     
     }
     
@@ -745,11 +788,49 @@ int GetThrottle(void)
 {
 
     //read the raw analog value and calculate the corresponding notch
-	int newval = CalcNotch(analogRead(THROTTLE_PIN));
-    
-    if(gThrottleNotch != newval)
+    /*NOTE: debouncing is somewhat complicated for a deliberate reason:-
+     when the lever is advanced several notches over a couple of seconds, we only
+     want to know when it has stopped moving. this is to give the motor controllers and sound system a solid
+     starting point and ending point for multi-notch accel/decel changes
+    */
+
+ 	 static int newval[3] = {0,0,0}; 
+     static int idx = 0;
+     
+     switch(idx)
+     {
+         case 0:
+            newval[0] = analogRead(THROTTLE_PIN);           //take first analog sample
+            newval[1] = 0;
+            newval[2] = 0;
+            idx++;
+            return 0;
+            
+         case 1:
+            newval[1] = analogRead(THROTTLE_PIN);           //take second analog sample
+            if(newval[0] != newval[1])
+                idx = 0;                            //we are in the middle of a change so reset for three new samples
+            else
+                idx++;                              //1st two analog samples match, so advance ready for third
+            return 0;
+                        
+         case 2:
+            newval[2] = analogRead(THROTTLE_PIN);
+            idx = 0;                                //completed 3 samples. start again either way
+            if(newval[0] != newval[1] || newval[1] != newval[2])
+            {
+                return 0;                            //Still in the middle of a change so reset for three new samples
+                
+            }
+            break;
+     }
+
+     newval[0] = CalcNotch(newval[0]);              //success to get here - three analogs match, not make it a notch
+     
+   if(gThrottleNotch != newval[0])                  //has notch changed?
     {
-        //by evaluating at notch level - we remove a lot of jitter automatically
+        //change has happened, and settled down sufficient to get three identical readings in order to get here
+        
         gControlsChanged = true;
        
         if(gDirection == DIR_NONE && newval > 0)
@@ -758,7 +839,7 @@ int GetThrottle(void)
             return 1;
         }
         
-        gThrottleNotch = newval;
+        gThrottleNotch = newval[0];
     
     }
     
