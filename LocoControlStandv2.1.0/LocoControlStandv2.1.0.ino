@@ -36,7 +36,8 @@
 12/03/2018: Change Version to 2.0.4
 25/05/2017: Add notch detent and modify use of analog potentiometer to modify speed increment per notch
 
-*/ End Recent Changes Log
+End Recent Changes Log  */
+
 
 #include <SoftwareSerial.h>   //used to drive comms to motor controllers
 #include <USBSabertooth.h>    //comms library for sabertooth controllers
@@ -493,17 +494,17 @@ void SetMotorSpeed(void)
 
 //***************************************************
 
-void SetDynamicBrake(int Notch)
+void SetDynamicBrake()
 {
 
-  int brake = (8 - gNotchSize) * Notch;          //used to scale the provided notch to a speed setting the controller understands (-2047-0-2047 range)
+  int brake = (8 - gNotchSize) * gDynamicNotch;          //used to scale the provided notch to a speed setting the controller understands (-2047-0-2047 range)
   //Note the notch is inverted so most gentle braking is on Notch one
 
   if (gDirection == DIR_REV)  brake = -brake;     //a negative number makes the motor go in reverse, positive = go forward
   //Note this must stay in the same direction of travel for Sabertooth braking to work properly
  
    Serial.print("setmotor(D):");
-   Serial.println(speed);
+   Serial.println(brake);
  
   //send the commands to the motor controllers
  
