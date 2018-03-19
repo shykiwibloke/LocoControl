@@ -279,7 +279,12 @@ void EvaluateState(void)
   if (gControlStatus == STATUS_ERROR)
   {
     //Stay there until the error clears
-    Serial.println(F("L:1:EvalutateState Error Condition Detected"));
+    Serial.println(F("L:1:EvalutateState Error Condition. Place Controls to Idle to clear"));
+    if ((gDirection == DIR_NONE) && (gThrottleNotch == 0) && (gDynamicNotch == 0))
+    {      //controls are safe and no errors detected with them
+	    gInitialized = true;
+	    ResetVigilanceWarning();
+	    CalcControlStatus(STATUS_IDLE, "Controls Now at Idle");
   }
   else
   {
@@ -1119,6 +1124,7 @@ void ConfigDigitalPins(void)
 void initSystem(void)
 {
   //set all the values by calling all the relevant subroutines
+  bool DoneOnce = false;
 
   gThrottleNotch = 0;
 
@@ -1149,20 +1155,22 @@ void initSystem(void)
     }
     else
     {
-
-      if (gDirection != DIR_NONE)
+      if(!DoneOnce)
       {
-        CalcControlStatus(STATUS_ERROR, "INIT:Reverser not in Neutral");
+        if (gDirection != DIR_NONE)
+        {
+          CalcControlStatus(STATUS_ERROR, "INIT:Reverser not in Neutral");
+        }
+        if (gThrottleNotch != 0)
+        {
+          CalcControlStatus(STATUS_ERROR, "INIT:Throttle not at zero");
+        }
+        if (gDynamicNotch != 0)
+        {
+          CalcControlStatus(STATUS_ERROR, "INIT:Dynamic not zero");
+        }
+        DoneOnce = true;	//only want to send the message once so debug screen is usable. Keep beeping tho!
       }
-      if (gThrottleNotch != 0)
-      {
-        CalcControlStatus(STATUS_ERROR, "INIT:Throttle not at zero");
-      }
-      if (gDynamicNotch != 0)
-      {
-        CalcControlStatus(STATUS_ERROR, "INIT:Dynamic not zero");
-      }
-
       SendBeep(1000, 1);
 
       gControlsChanged = 0;
