@@ -51,7 +51,7 @@
 #define SERIAL_BUFSIZE	50		  //Reserve 50 bytes for sending and receiving messages with the raspi
 #define MOTOR_TIMEOUT -32768   //value returned by Sabertooth library when comms fails
 
-#define NOTCH_DETENT 15     //used to place the notch boundary BETWEEN actual notch positions
+#define NOTCH_DETENT 0     //used to place the notch boundary BETWEEN actual notch positions
 #define NOTCH1 760 + NOTCH_DETENT     //below NOTCH1 is IDLE
 #define NOTCH2 790 + NOTCH_DETENT      //below NOTCH2 is NOTCH1
 #define NOTCH3 830 + NOTCH_DETENT      //below NOTCH3 is NOTCH2   etc

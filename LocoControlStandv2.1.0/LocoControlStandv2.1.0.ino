@@ -58,7 +58,7 @@ End Recent Changes Log  */
 #define SERIAL_BUFSIZE	50		  //Reserve 50 bytes for sending and receiving messages with the raspi
 #define MOTOR_TIMEOUT -32768   //value returned by Sabertooth library when comms fails
 
-#define NOTCH_DETENT 15     //used to place the notch boundary BETWEEN actual notch positions
+#define NOTCH_DETENT 0     //used to adjust the notch boundaries
 #define NOTCH1 760 + NOTCH_DETENT     //below NOTCH1 is IDLE
 #define NOTCH2 790 + NOTCH_DETENT      //below NOTCH2 is NOTCH1
 #define NOTCH3 830 + NOTCH_DETENT      //below NOTCH3 is NOTCH2   etc
@@ -292,21 +292,21 @@ void EvaluateState(void)
     {
       //Direction has been set to forward or reverse - dont actually care which here.
 
-      if (gDynamicNotch > 0 && gDynBrakeActive == true)
+ /*     if (gDynamicNotch > 0 && gDynBrakeActive == true)
       {
         CalcControlStatus(STATUS_DYNAMIC, "Dyn Brake ON");
 
         Serial.print(F("S:"));
         Serial.print(gDynamicNotch);
         Serial.println(F(":"));
-		SetDynamicBrake();    //go adjust motors into proper dynamic notch
+		    SetDynamicBrake();    //go adjust motors into proper dynamic notch
       }
-      else if (gThrottleNotch > 0)
+      else */ if (gThrottleNotch > 0)
       {
         int old = gControlStatus;
         CalcControlStatus(STATUS_POWER, "Throttle ON");
-
-		if (gDynBrakeActive == true)
+      }
+	/*	if (gDynBrakeActive == true)
 		{
 			//if we are in dynamic mode - need to 'coast' with throttle closed
 			//do the calculations for coasting here.
@@ -315,14 +315,13 @@ void EvaluateState(void)
 			//**TODO** WORKING HERE **
 			//(note no calcs means code just drops through and works as is now)
 		}
-			
+		*/	
 		//Send Sound Command
         Serial.print(F("S:"));
         Serial.print(gThrottleNotch);
         Serial.println(F(":"));
         SetMotorSpeed();   //go adjust motors
         
-      }
     }
   }
 
@@ -1175,35 +1174,5 @@ void initSystem(void)
 
 
 //***************************************************
-/*
-  bool TestMotorControllers(void)
-  {
-    //tests that the three motor controllers are present and ready to work
-    //note also acts as a test for the traction isolator....
-    //battery voltage must be above ten volts for this to succeed
 
-    int timeout;
-    int alive = 0;
-
-    for(int f=0;f<3;f++)
-    {
-    	Serial.print(F("L:1:Contacting Motor Controller "));
-      Serial.println(f+1);
-
-      timeout = gSabertooth[f].getGetTimeout();
-        if(timeout != 1000) {
-        			Serial.print(F("L:1:Disconnected or faulty. Timeout returned was: "));
-              Serial.println(timeout);
-        } else {
-    			Serial.println(F("L:1:Online."));
-     			alive += 1;
-        }
-      delay(1000);
-    }
-
-    return (alive > 0);
-
-  }
-
-*/
 
