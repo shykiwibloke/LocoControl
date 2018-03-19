@@ -281,10 +281,13 @@ void EvaluateState(void)
     //Stay there until the error clears
     Serial.println(F("L:1:EvalutateState Error Condition. Place Controls to Idle to clear"));
     if ((gDirection == DIR_NONE) && (gThrottleNotch == 0) && (gDynamicNotch == 0))
-    {      //controls are safe and no errors detected with them
-	    gInitialized = true;
-	    ResetVigilanceWarning();
-	    CalcControlStatus(STATUS_IDLE, "Controls Now at Idle");
+    {      
+      //controls are safe and no errors detected with them
+      gInitialized = true;
+      ResetVigilanceWarning();
+      CalcControlStatus(STATUS_IDLE, "Controls Now at Idle");
+      SetMotorSpeed();
+    }
   }
   else
   {
