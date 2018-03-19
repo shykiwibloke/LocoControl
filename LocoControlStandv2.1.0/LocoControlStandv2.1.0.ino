@@ -343,7 +343,9 @@ void CalcControlStatus(const int NewStatus, const char* Msg)
   {
     if (NewStatus == STATUS_ERROR || gControlStatus == STATUS_ERROR)
     {
-      Serial.println(F("L:1:Critical Error. Controls not in safe state to contine."));    //print the error heading
+      Serial.print(F("L:1:Critical Error - "));    //print the error heading
+      Serial.println(Msg);              //print the passed message
+
     }
 
     gControlStatus = NewStatus;       //set the new status
