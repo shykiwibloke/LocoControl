@@ -28,6 +28,11 @@
 ****************************************************/
 
 /* Recent Changes Log 
+
+28/03/2018: Fixed bug in GetDynamicMode that was calling print endlessly in idle.
+28/03/2018: Modify CalcMotorNotchSize to range of 128-255 for pot sweep
+28/03/2018: Fixed FlashDitchLights --gDitchFlashCount < 2
+28/03/2018: Fixed SetDynamicBrake Notch Calculation
 13/03/2018: Added DYN_KEY_SW and its associated logic
 12/03/2018: Dynamic Brake changes ready for testing (Forgotten when these were done)
 12/03/2018: Changed Momentum() to CalcMotorNotchSize()
@@ -280,8 +285,8 @@ void EvaluateState(void)
   {
     //Stay there until the error clears
     Serial.println(F("L:1:EvalutateState Error Condition. Place Controls to Idle to clear"));
-    if ((gDirection == DIR_NONE) && (gThrottleNotch == 0) && (gDynamicNotch == 0))
-    {      
+    if ((gDirection == DIR_NONE) && (gThrottleNotch == 0) && (gDynamicNotch == 0))
+    {
       //controls are safe and no errors detected with them
       gInitialized = true;
       ResetVigilanceWarning();
@@ -397,10 +402,11 @@ void CalcMotorNotchSize(void)
   //read it, note: Arduino analog range is roughly half that of the sabertooth & this routine takes that into account
   int newval = analogRead(MAX_SPEED_PIN) >> 4;
 
-  //limit-check the value to fit ramping range before comparing it to last setting/using it
+  newval += 128;			//shift up to 128-255 range
+
+  //limit-check the value to fit range 128-255 before comparing it to last setting/using it
   if (newval > MAX_NOTCH_SIZE) newval = MAX_NOTCH_SIZE;
-  if (newval < 32) newval = 32;			//Cant be zero as that would be a hard thing to figure for newbie drivers!
-										//Make it of sufficient size that loco moves when wound right up to notch 8
+  if (newval < 128) newval = 128;
 
   //has it changed?
   if (gNotchSize != newval)
@@ -506,7 +512,7 @@ void SetMotorSpeed(void)
 void SetDynamicBrake()
 {
 
-  int brake = (8 - gNotchSize) * gDynamicNotch;          //used to scale the provided notch to a speed setting the controller understands (-2047-0-2047 range)
+  int brake = (8 - gDynamicNotch) * gNotchSize;          //used to scale the provided notch to a speed setting the controller understands (-2047-0-2047 range)
   //Note the notch is inverted so most gentle braking is on Notch one
 
   if (gDirection == DIR_REV)  brake = -brake;     //a negative number makes the motor go in reverse, positive = go forward
@@ -585,7 +591,7 @@ void FlashDitchlights(void)
 {
   //Called by timer callback setup within CheckHorn()
 
-  if (--gDitchFlashCount < 1)
+  if (--gDitchFlashCount < 2)
   {
     //restore both ditch lights to whatever they were by invalidating current position
     gHeadlights -1;
@@ -679,39 +685,62 @@ void ResetVigilanceWarning(void)
 
 void GetMotorCurrent()
 {
-  //call with unscaled true to get real current (to use to determine scaling)
-  //call with unscaled false in normal operation to obtain % of useable capacity
-  //todo - gotta do something with the data
-
+  
   static int Motor = 0;
+  int        rawvalue = 0;
 
   //Gets amps on cycle - for motor one, then two on second run etc.
 
-
-  if (Motor == 0) //slot zero used to calc total amperage
+  switch(Motor)
   {
-    gMotorCurrent[0] = gMotorCurrent[1] + gMotorCurrent[2] + gMotorCurrent[3] + gMotorCurrent[4] + gMotorCurrent[5] + gMotorCurrent[6];
+      case 1:
+          rawvalue = gSabertooth[0].getCurrent((1), false);
+          exit;
+      case 2:
+          rawvalue = gSabertooth[0].getCurrent((2), false);
+          exit;
+      case 3:
+          rawvalue = gSabertooth[1].getCurrent((1), false);
+          exit;
+      case 4:
+          rawvalue = gSabertooth[1].getCurrent((2), false);
+          exit;
+      case 5:
+          rawvalue = gSabertooth[2].getCurrent((1), false);
+          exit;
+      case 6:
+          rawvalue = gSabertooth[2].getCurrent((2), false);
+          exit;
+      default:
+          gMotorCurrent[0] = gMotorCurrent[1] + gMotorCurrent[2] + gMotorCurrent[3] + gMotorCurrent[4] + gMotorCurrent[5] + gMotorCurrent[6];
+          Motor = 0;
+          exit;
   }
-  else
-  {
-    //Get current via first driver using ascii representation of motor number
-    gMotorCurrent[Motor] = gSabertooth[0].getCurrent((Motor + 49), false);
-
-    if (abs(gMotorCurrent[Motor]) < 300 || gMotorCurrent[Motor] > -31000) //if less than 300ma or timed out
+    
+    
+ 
+    if (abs(rawvalue) < 300 || rawvalue > -31000) //if less than 300ma or timed out
+    {
       gMotorCurrent[Motor] = 0;
+    }
     else
-      gMotorCurrent[0] = gMotorCurrent[0] / 100;              //change milliamps to Amps
-  }
+    {
+      rawvalue = rawvalue / 100;              //change milliamps to Amps
+    }
+    
+    if (rawvalue != gMotorCurrent[Motor])
+    {
 
-  //log the retrieved value or calculated total
-  Serial.print(F("M:"));
-  Serial.print(Motor);
-  Serial.print(":");
-  Serial.println(gMotorCurrent[0]);
+      //send to display
+      Serial.print(F("M:"));
+      Serial.print(Motor);
+      Serial.print(":");
+      Serial.println(gMotorCurrent[0]);
 
-
-  Motor ++;
-  if (Motor > 6) Motor = 0;
+    }
+    
+    Motor ++;
+    if (Motor > 6) Motor = 0;
 
 }
 
@@ -769,7 +798,7 @@ bool GetDynamicMode(void)
 	/* Get Dynamic Mode looks at the keyswitch and sets the global variable gDynBrakeActive
 	*/
 	
-	bool temp = digitalRead(DYN_KEY_SW);
+	bool temp = !digitalRead(DYN_KEY_SW);   //key pulls line low to activate DYn Mode.
 	if (gDynBrakeActive != temp)
 	{
 		Serial.print(F("L:4: Dynamic Mode "));
@@ -781,7 +810,7 @@ bool GetDynamicMode(void)
 		{
 			Serial.println("OFF");
 		}
-	gDynBrakeActive == temp;
+	  gDynBrakeActive = temp;
 	}
 }
 //***************************************************
