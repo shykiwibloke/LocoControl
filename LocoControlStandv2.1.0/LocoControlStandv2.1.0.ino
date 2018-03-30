@@ -1,7 +1,7 @@
 /****************************************************
 **                                                 **
 **  Loco Control Stand version                     **/
-#define VERSION "2.1.0"
+#define VERSION "2.1.1"
 /*                                                 **
 **  Written by Chris Draper                        **
 **  Copyright (c) 2016                             **
@@ -28,7 +28,11 @@
 ****************************************************/
 
 /* Recent Changes Log 
-
+31/03/2018: Fixed Flashing lights - invalid setting was wrong - changed to 3
+31/03/2018: moved CalcMotorNotchSize() to every ten seconds check instead of only at idle
+31/03/2018: Fixed Bug in Arduino comms receive + put delay in reboot command execution
+31/03/2018: SetGetTimeout increased from 1000 to 1500 to fix timeout for GetBatteryVoltage 
+28/03/2018: SetMotorRamping configured to set to 2000 at startup (guess to be tested)
 28/03/2018: Fixed bug in GetDynamicMode that was calling print endlessly in idle.
 28/03/2018: Modify CalcMotorNotchSize to range of 128-255 for pot sweep
 28/03/2018: Fixed FlashDitchLights --gDitchFlashCount < 2
@@ -62,6 +66,7 @@ End Recent Changes Log  */
 #define RASPI_SERIAL_SPEED 19200     //faster speed over USB link
 #define SERIAL_BUFSIZE	50		  //Reserve 50 bytes for sending and receiving messages with the raspi
 #define MOTOR_TIMEOUT -32768   //value returned by Sabertooth library when comms fails
+#define MOTOR_RAMPING 2500      //smooths transition between notches
 
 #define NOTCH_DETENT 0     //used to adjust the notch boundaries
 #define NOTCH1 760 + NOTCH_DETENT     //below NOTCH1 is IDLE
@@ -265,7 +270,6 @@ void ReadInputs(void)
   
   if (gControlStatus == STATUS_IDLE)   //only want to evaluate these items if the loco is at a standstill
   {
-	  CalcMotorNotchSize();
 	  GetDynamicMode();
   }
   
@@ -443,7 +447,8 @@ void DoTimedIntervalChecks(void)
   }
  // else
  // {
-    // todo - calc something every ten seconds, but opp motor current call
+    // calc notch size every ten seconds, but opp motor current call
+    CalcMotorNotchSize();
  // }
 
   if (callcount == 3)    //stuff every 15 seconds, but opposite the next lot
@@ -533,8 +538,7 @@ void SetDynamicBrake()
 }
 
 //***************************************************
-/*
-// Obsolete code after CalcMotorNotchSize changes?
+
 void SetMotorRamping(int newvalue)
 {
 
@@ -546,7 +550,7 @@ void SetMotorRamping(int newvalue)
   gSabertooth[2].setRamping(newvalue);
 
 }
-*/
+
 //***************************************************
 void CheckHeadlights(void)
 {
@@ -594,7 +598,7 @@ void FlashDitchlights(void)
   if (--gDitchFlashCount < 2)
   {
     //restore both ditch lights to whatever they were by invalidating current position
-    gHeadlights -1;
+    gHeadlights = 3;
     CheckHeadlights();
     return;
   }
@@ -752,12 +756,13 @@ void GetBattery(void)
   gBattery = gSabertooth[2].getBattery(1, false);
   if (gBattery == MOTOR_TIMEOUT)
   {
-    SendBeep(50, 1);
-    gBattery = 0;
+     gBattery = 0;
   } else if (gBattery > 0)
   {
     gBattery = gBattery / 10;
   }
+
+  //todo - only send battery if it changes!
 
   Serial.print(F("V:1:"));
   Serial.println(gBattery);
@@ -998,9 +1003,9 @@ void ConfigComms(void)
   //give the serial lines time to come up before using them - wait three seconds
   delay(3000);
 
-  gSabertooth[0].setGetTimeout(1000);
-  gSabertooth[1].setGetTimeout(1000);
-  gSabertooth[2].setGetTimeout(1000);
+  gSabertooth[0].setGetTimeout(1500);
+  gSabertooth[1].setGetTimeout(1500);
+  gSabertooth[2].setGetTimeout(1500);
   
 
   //Announce Our arrival
@@ -1017,7 +1022,7 @@ void ServiceComms(void)
     Serial.print(F("Received:-"));
     Serial.println(gRaspi_RxBuffer);     //todo - replace with a call to a future Raspi command interpreter
 
-    switch (gRaspi_RxBuffer[1])
+    switch (gRaspi_RxBuffer[0])
     {
       case 'H':
       case 'h':
@@ -1026,6 +1031,7 @@ void ServiceComms(void)
       case 'R':
       case 'r':
         //allows raspi to force reboot of arduino
+        delay(10);
         softReset();
         break;
       default:
@@ -1165,6 +1171,7 @@ void initSystem(void)
   //Ensure motor drivers are in a known minimal state
   //    GetTemperature();         //get and send to the raspi
   CalcMotorNotchSize();
+  SetMotorRamping(MOTOR_RAMPING);
   GetDynamicMode();
   GetBattery();
   CheckHeadlights();
@@ -1183,6 +1190,7 @@ void initSystem(void)
       //controls are safe and no errors detected with them
       gInitialized = true;
       ResetVigilanceWarning();
+      Serial.println(" ");
       CalcControlStatus(STATUS_IDLE, "Initialized OK Now at Idle");
     }
     else
