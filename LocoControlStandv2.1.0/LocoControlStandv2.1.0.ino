@@ -431,33 +431,22 @@ void DoTimedIntervalChecks(void)
 {
   //Stuff that only needs to be checked every five seconds or so Called by timer routine
   static int callcount = 0;
-  static bool OddCall = false;
 
-  //SendCommsHeartbeat();     //we will send it every five seconds even if there are commands going to the controllers.
-  
   //IF we are busy flashing the ditch lights - dont query the slow-to-answer variables from the motor controlers
   // just exit and come back later.
   if(gDitchFlashCount > 0)
     return;
 
-  if (OddCall)
-  {
-    GetMotorCurrent();   //get and send to the raspi every ten seconds
-    OddCall = !OddCall;
-  }
- // else
- // {
-    // calc notch size every ten seconds, but opp motor current call
-    CalcMotorNotchSize();
- // }
+  GetMotorCurrent();   //get and send to the raspi every five seconds
 
-  if (callcount == 3)    //stuff every 15 seconds, but opposite the next lot
+  if (callcount == 3)    //stuff every 15 seconds
   {
     GetBattery();
   }
+  
   if (callcount++ > 6)   //stuff that can be done every 30 seconds
   {
-    // GetTemperature();         //TODO - keep? get and send to the raspi
+    CalcMotorNotchSize();
     callcount = 0;
   }
 
@@ -691,60 +680,59 @@ void GetMotorCurrent()
 {
   
   static int Motor = 0;
-  int        rawvalue = 0;
+  int      rawvalue = 0;
 
   //Gets amps on cycle - for motor one, then two on second run etc.
 
-  switch(Motor)
-  {
-      case 1:
-          rawvalue = gSabertooth[0].getCurrent((1), false);
-          exit;
-      case 2:
-          rawvalue = gSabertooth[0].getCurrent((2), false);
-          exit;
-      case 3:
-          rawvalue = gSabertooth[1].getCurrent((1), false);
-          exit;
-      case 4:
-          rawvalue = gSabertooth[1].getCurrent((2), false);
-          exit;
-      case 5:
-          rawvalue = gSabertooth[2].getCurrent((1), false);
-          exit;
-      case 6:
-          rawvalue = gSabertooth[2].getCurrent((2), false);
-          exit;
-      default:
-          gMotorCurrent[0] = gMotorCurrent[1] + gMotorCurrent[2] + gMotorCurrent[3] + gMotorCurrent[4] + gMotorCurrent[5] + gMotorCurrent[6];
-          Motor = 0;
-          exit;
-  }
-    
-    
- 
-    if (abs(rawvalue) < 300 || rawvalue > -31000) //if less than 300ma or timed out
+    switch(Motor)
     {
-      gMotorCurrent[Motor] = 0;
+        case 1:
+            rawvalue = gSabertooth[0].getCurrent((1), false);
+            break;
+        case 2:
+            rawvalue = gSabertooth[0].getCurrent((2), false);
+            break;
+        case 3:
+            rawvalue = gSabertooth[1].getCurrent((1), false);
+            break;
+        case 4:
+            rawvalue = gSabertooth[1].getCurrent((2), false);
+            break;
+        case 5:
+            rawvalue = gSabertooth[2].getCurrent((1), false);
+            break;
+        case 6:
+            rawvalue = gSabertooth[2].getCurrent((2), false);
+            break;
+        default:
+            rawvalue = gMotorCurrent[1] + gMotorCurrent[2] + gMotorCurrent[3] + gMotorCurrent[4] + gMotorCurrent[5] + gMotorCurrent[6];
+    }
+      
+ 
+    if (rawvalue < 20 || rawvalue == MOTOR_TIMEOUT) //if > 2amps or timed out
+    {
+      rawvalue = 0;
     }
     else
     {
-      rawvalue = rawvalue / 100;              //change milliamps to Amps
+      rawvalue = rawvalue / 10;     //convert tenth of an amp to amps
     }
-    
+     
     if (rawvalue != gMotorCurrent[Motor])
     {
+
+      gMotorCurrent[Motor] = rawvalue;
 
       //send to display
       Serial.print(F("M:"));
       Serial.print(Motor);
       Serial.print(":");
-      Serial.println(gMotorCurrent[0]);
+      Serial.println(gMotorCurrent[Motor]);
 
     }
     
     Motor ++;
-    if (Motor > 6) Motor = 0;
+    if (Motor > 6) Motor = 0;   
 
 }
 
@@ -753,13 +741,14 @@ void GetBattery(void)
 {
 
   //Battery should be the same for all controllers - so only have to read one
-  gBattery = gSabertooth[2].getBattery(1, false);
+  gBattery = gSabertooth[0].getBattery(1, false);
   if (gBattery == MOTOR_TIMEOUT)
   {
      gBattery = 0;
-  } else if (gBattery > 0)
+  } 
+  else if (gBattery > 0)
   {
-    gBattery = gBattery / 10;
+    gBattery = gBattery / 10;   //in tenths of a volt
   }
 
   //todo - only send battery if it changes!
@@ -1003,9 +992,9 @@ void ConfigComms(void)
   //give the serial lines time to come up before using them - wait three seconds
   delay(3000);
 
-  gSabertooth[0].setGetTimeout(1500);
-  gSabertooth[1].setGetTimeout(1500);
-  gSabertooth[2].setGetTimeout(1500);
+  gSabertooth[0].setGetTimeout(2000);
+  gSabertooth[1].setGetTimeout(2000);
+  gSabertooth[2].setGetTimeout(2000);
   
 
   //Announce Our arrival
