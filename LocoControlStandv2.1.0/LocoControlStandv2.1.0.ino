@@ -1,7 +1,7 @@
 /****************************************************
 **                                                 **
 **  Loco Control Stand version                     **/
-#define VERSION "2.1.1"
+#define VERSION "2.1.2"
 /*                                                 **
 **  Written by Chris Draper                        **
 **  Copyright (c) 2016                             **
@@ -28,6 +28,10 @@
 ****************************************************/
 
 /* Recent Changes Log 
+ *  2.1.2
+03/04/2018: Removed old debug code / shortened some text messages
+03/04/2018: Fixed Volts and Amps from Motor Controllers.
+ *  2.1.1
 31/03/2018: Fixed Flashing lights - invalid setting was wrong - changed to 3
 31/03/2018: moved CalcMotorNotchSize() to every ten seconds check instead of only at idle
 31/03/2018: Fixed Bug in Arduino comms receive + put delay in reboot command execution
@@ -420,7 +424,7 @@ void CalcMotorNotchSize(void)
     gNotchSize = newval;
 	
 	//and Advise
-	Serial.print(F("L:4:Set NotchSize to:  "));
+	Serial.print(F("L:4:NotchSize="));
     Serial.println(gNotchSize);
 
   }
@@ -460,13 +464,13 @@ void DoTimedIntervalChecks(void)
   {
     if (gVigilanceCount++ > 6)  //more than 30 seconds since a control was touched
     {
-      Serial.println(F("L:2:Vigilance Light Triggered"));
+      Serial.println(F("L:2:Vig Light"));
       SetVigilanceWarning(false);
     }
 
     if (gVigilanceCount > 8)  //light been on for at least 10 seconds
     {
-      Serial.println(F("L:2:Vigilance Buzzer Triggered"));
+      Serial.println(F("L:2:Vig Buzzer"));
       SetVigilanceWarning(true);   //buzzer goes off 10 seconds later
     }
 
@@ -488,10 +492,7 @@ void SetMotorSpeed(void)
 
   if (gDirection == DIR_REV)  speed = -speed;                    //a negative number makes the motor go in reverse, positive = go forward
 
-  Serial.print("setmotor(T):");
-  Serial.println(speed);
-
-	   //send the commands to the motor controllers
+  //send the commands to the motor controllers
 
   gSabertooth[0].motor(1, speed);     //first pair
   gSabertooth[0].motor(2, speed);
@@ -531,9 +532,6 @@ void SetDynamicBrake()
 void SetMotorRamping(int newvalue)
 {
 
-  Serial.print(F("L:4:Set Ramping to "));
-  Serial.println(newvalue);
-
   gSabertooth[0].setRamping(newvalue);
   gSabertooth[1].setRamping(newvalue);
   gSabertooth[2].setRamping(newvalue);
@@ -556,19 +554,19 @@ void CheckHeadlights(void)
         gSabertooth[HEADLIGHT_ST].power(LIGHT_OFF);
         gSabertooth[DITCHLIGHT_L].power(LIGHT_OFF);
         gSabertooth[DITCHLIGHT_R].power(LIGHT_OFF);
-        Serial.println(F("L:2:Headlights off"));
+        Serial.println(F("L:2:lights off"));
         break;
       case 1:  //headlight on dip
         gSabertooth[HEADLIGHT_ST].power(LIGHT_HALF);
         gSabertooth[DITCHLIGHT_L].power(LIGHT_HALF);
         gSabertooth[DITCHLIGHT_R].power(LIGHT_HALF);
-        Serial.println(F("L:2:Headlights dip"));
+        Serial.println(F("L:2:lights dip"));
         break;
       case 2: //headlight on full
         gSabertooth[HEADLIGHT_ST].power(LIGHT_FULL);
         gSabertooth[DITCHLIGHT_L].power(LIGHT_FULL);
         gSabertooth[DITCHLIGHT_R].power(LIGHT_FULL);
-        Serial.println(F("L:2:Headlights full"));
+        Serial.println(F("L:2:lights full"));
         break;
 
     }
@@ -594,13 +592,11 @@ void FlashDitchlights(void)
 
   if (gDitchFlashCount%2 == 0)     //if count is even
   {
-      //Serial.println(F("L:4:FlashL"));
       gSabertooth[DITCHLIGHT_L].power(LIGHT_FULL);  //turn left ditchlight
       gSabertooth[DITCHLIGHT_R].power(LIGHT_OFF);  //turn left ditchlight
   }
   else
   {
-      //Serial.println(F("L:4:FlashR"));
       gSabertooth[DITCHLIGHT_R].power(LIGHT_FULL);  //turn left ditchlight
       gSabertooth[DITCHLIGHT_L].power(LIGHT_OFF);  //turn left ditchlight
   }
@@ -740,25 +736,27 @@ void GetMotorCurrent()
 void GetBattery(void)
 {
 
+  int temp = 0;
+  
   //Battery should be the same for all controllers - so only have to read one
-  gBattery = gSabertooth[0].getBattery(1, false);
-  if (gBattery == MOTOR_TIMEOUT)
+  temp = gSabertooth[0].getBattery(1, false);
+  if (temp == MOTOR_TIMEOUT)
   {
-     gBattery = 0;
+     temp = 0;
   } 
-  else if (gBattery > 0)
+
+  if (temp != gBattery)
   {
-    gBattery = gBattery / 10;   //in tenths of a volt
+    //only send battery if it changes
+    gBattery = temp;
+
+    Serial.print(F("V:1:"));
+    Serial.println(gBattery);
   }
-
-  //todo - only send battery if it changes!
-
-  Serial.print(F("V:1:"));
-  Serial.println(gBattery);
-
 }
 
 //***************************************************
+/*
 void GetTemperature(void)
 {
   static int driver = 0;
@@ -785,7 +783,7 @@ void GetTemperature(void)
   driver ++;
   if (driver > 2) driver = 0;
 }
-
+*/
 //***************************************************
 bool GetDynamicMode(void)
 {
@@ -795,7 +793,7 @@ bool GetDynamicMode(void)
 	bool temp = !digitalRead(DYN_KEY_SW);   //key pulls line low to activate DYn Mode.
 	if (gDynBrakeActive != temp)
 	{
-		Serial.print(F("L:4: Dynamic Mode "));
+		Serial.print(F("L:4: Dyn Mode "));
 		if(temp)
 		{
 			Serial.println("ON");
@@ -900,7 +898,7 @@ int GetDynamic(void)
 
     if (gDirection == DIR_NONE && newval[1] > 0)
     {
-      CalcControlStatus(STATUS_ERROR, "ERROR: Dynamic Brake Set. Reverser Neutral");
+      CalcControlStatus(STATUS_ERROR, "ERROR: Dyn Set. Dir Neutral");
       return 1;
     }
 
@@ -963,7 +961,7 @@ int GetThrottle(void)
 
     if (gDirection == DIR_NONE && newval > 0)
     {
-      CalcControlStatus(STATUS_ERROR, "ERROR: Throttle Set. Reverser Neutral");
+      CalcControlStatus(STATUS_ERROR, "ERROR: Throttle Set. Dir Neutral");
       return 1;
     }
 
@@ -998,7 +996,7 @@ void ConfigComms(void)
   
 
   //Announce Our arrival
-  Serial.print(F("L:1:Loco Control Stand Version: "));
+  Serial.print(F("L:1:Loco Control Stand Ver: "));
   Serial.println(F(VERSION));
 }
 
@@ -1008,8 +1006,6 @@ void ServiceComms(void)
   //Check to see if anything has arrived from the Raspi
   if (gRaspi_RxComplete)
   {
-    Serial.print(F("Received:-"));
-    Serial.println(gRaspi_RxBuffer);     //todo - replace with a call to a future Raspi command interpreter
 
     switch (gRaspi_RxBuffer[0])
     {
@@ -1024,7 +1020,7 @@ void ServiceComms(void)
         softReset();
         break;
       default:
-        Serial.print(F("L:4:Unrecognised command from Raspi:-"));
+        Serial.print(F("L:4:Bad command rec'd:-"));
         Serial.println(gRaspi_RxBuffer);
     }
 
@@ -1180,7 +1176,7 @@ void initSystem(void)
       gInitialized = true;
       ResetVigilanceWarning();
       Serial.println(" ");
-      CalcControlStatus(STATUS_IDLE, "Initialized OK Now at Idle");
+      CalcControlStatus(STATUS_IDLE, "Init OK");
     }
     else
     {
@@ -1188,15 +1184,15 @@ void initSystem(void)
       {
         if (gDirection != DIR_NONE)
         {
-          CalcControlStatus(STATUS_ERROR, "INIT:Reverser not in Neutral");
+          CalcControlStatus(STATUS_ERROR, "INIT:Reverser not Neutral");
         }
         if (gThrottleNotch != 0)
         {
-          CalcControlStatus(STATUS_ERROR, "INIT:Throttle not at zero");
+          CalcControlStatus(STATUS_ERROR, "INIT:Throttle > 0");
         }
         if (gDynamicNotch != 0)
         {
-          CalcControlStatus(STATUS_ERROR, "INIT:Dynamic not zero");
+          CalcControlStatus(STATUS_ERROR, "INIT:Dynamic > 0");
         }
         DoneOnce = true;	//only want to send the message once so debug screen is usable. Keep beeping tho!
       }
