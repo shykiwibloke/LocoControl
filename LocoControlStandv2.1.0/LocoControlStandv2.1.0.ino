@@ -29,6 +29,10 @@
 
 /* Recent Changes Log 
  *  2.1.2
+26/05/2018: Modified Battery voltage routine to ignore timeouts (and not set battery to zero)
+26/05/2018: Commented out a few debug messages to limit print slowness
+26/05/2018: Shortened Motor Comms timeout to 1 second to speed responsiveness
+26/05/2018: Altered motor current routine to report down to one amp instead of two.
 03/04/2018: Removed old debug code / shortened some text messages
 03/04/2018: Fixed Volts and Amps from Motor Controllers.
  *  2.1.1
@@ -268,7 +272,7 @@ void ReadInputs(void)
 
   if (digitalRead(BTN_VIGILANCE))   //Hitting vigilance button is considered a control change
   {
-    Serial.println(F("L:2:Vigilance Manual Reset"));
+    //Serial.println(F("L:2:Vigilance Manual Reset"));
     ResetVigilanceWarning();        //Just reset vigilance - not a control 'change'
   }
   
@@ -464,13 +468,13 @@ void DoTimedIntervalChecks(void)
   {
     if (gVigilanceCount++ > 6)  //more than 30 seconds since a control was touched
     {
-      Serial.println(F("L:2:Vig Light"));
+      //Serial.println(F("L:2:Vig Light"));
       SetVigilanceWarning(false);
     }
 
     if (gVigilanceCount > 8)  //light been on for at least 10 seconds
     {
-      Serial.println(F("L:2:Vig Buzzer"));
+      //Serial.println(F("L:2:Vig Buzzer"));
       SetVigilanceWarning(true);   //buzzer goes off 10 seconds later
     }
 
@@ -554,19 +558,19 @@ void CheckHeadlights(void)
         gSabertooth[HEADLIGHT_ST].power(LIGHT_OFF);
         gSabertooth[DITCHLIGHT_L].power(LIGHT_OFF);
         gSabertooth[DITCHLIGHT_R].power(LIGHT_OFF);
-        Serial.println(F("L:2:lights off"));
+        //Serial.println(F("L:2:lights off"));
         break;
       case 1:  //headlight on dip
         gSabertooth[HEADLIGHT_ST].power(LIGHT_HALF);
         gSabertooth[DITCHLIGHT_L].power(LIGHT_HALF);
         gSabertooth[DITCHLIGHT_R].power(LIGHT_HALF);
-        Serial.println(F("L:2:lights dip"));
+        //Serial.println(F("L:2:lights dip"));
         break;
       case 2: //headlight on full
         gSabertooth[HEADLIGHT_ST].power(LIGHT_FULL);
         gSabertooth[DITCHLIGHT_L].power(LIGHT_FULL);
         gSabertooth[DITCHLIGHT_R].power(LIGHT_FULL);
-        Serial.println(F("L:2:lights full"));
+        //Serial.println(F("L:2:lights full"));
         break;
 
     }
@@ -705,7 +709,7 @@ void GetMotorCurrent()
     }
       
  
-    if (rawvalue < 20 || rawvalue == MOTOR_TIMEOUT) //if > 2amps or timed out
+    if (rawvalue < 10 || rawvalue == MOTOR_TIMEOUT) //if > 1 amps or timed out
     {
       rawvalue = 0;
     }
@@ -740,18 +744,19 @@ void GetBattery(void)
   
   //Battery should be the same for all controllers - so only have to read one
   temp = gSabertooth[0].getBattery(1, false);
-  if (temp == MOTOR_TIMEOUT)
+  if (temp != MOTOR_TIMEOUT)
   {
-     temp = 0;
-  } 
 
-  if (temp != gBattery)
-  {
-    //only send battery if it changes
-    gBattery = temp;
-
-    Serial.print(F("V:1:"));
-    Serial.println(gBattery);
+    //todo - maybe reset comms if battery timeout?
+      
+    if (temp != gBattery)
+    {
+      //only send battery if it changes
+      gBattery = temp;
+  
+      Serial.print(F("V:1:"));
+      Serial.println(gBattery);
+    }
   }
 }
 
@@ -990,9 +995,9 @@ void ConfigComms(void)
   //give the serial lines time to come up before using them - wait three seconds
   delay(3000);
 
-  gSabertooth[0].setGetTimeout(2000);
-  gSabertooth[1].setGetTimeout(2000);
-  gSabertooth[2].setGetTimeout(2000);
+  gSabertooth[0].setGetTimeout(1000);
+  gSabertooth[1].setGetTimeout(1000);
+  gSabertooth[2].setGetTimeout(1000);
   
 
   //Announce Our arrival
@@ -1062,7 +1067,7 @@ void serialEvent()
 void SendCommsHeartbeat(void)
 {
 #ifdef LOG_LEVEL_4
-  Serial.println(F("L:4:Heartbeat"));
+  //Serial.println(F("L:4:Heartbeat"));
 #endif
   gSabertooth[0].keepAlive();
   gSabertooth[1].keepAlive();
