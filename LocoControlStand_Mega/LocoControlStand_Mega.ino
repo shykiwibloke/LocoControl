@@ -1,7 +1,7 @@
 /****************************************************
 **                                                 **
 **  Loco Control Stand version                     **/
-#define VERSION "2.1.2"
+#define VERSION "3.0.1"
 /*                                                 **
 **  Written by Chris Draper                        **
 **  Copyright (c) 2016                             **
@@ -28,6 +28,7 @@
 ****************************************************/
 
 /* Recent Changes Log 
+23/06/2018: Start modifications to work on Mega - remove software serial in favour of hardware Serial1
  *  2.1.2
 26/05/2018: Modified Battery voltage routine to ignore timeouts (and not set battery to zero)
 26/05/2018: Commented out a few debug messages to limit print slowness
@@ -56,7 +57,7 @@
 End Recent Changes Log  */
 
 
-#include <SoftwareSerial.h>   //used to drive comms to motor controllers
+//#include <SoftwareSerial.h>   //used to drive comms to motor controllers
 #include <USBSabertooth.h>    //comms library for sabertooth controllers
 //#include <Servo.h>            //used for speedo - can be removed to make space if no speedo fitted 
 #include <SimpleTimer.h>      //used for vigilance and heartbeat type functions
@@ -189,8 +190,10 @@ SimpleTimer gtimer;                         //Only need one timer as all timing 
 //***************************************************
 //define soft serial port for motor comms here
 
-SoftwareSerial SWSerial(3, 4);              // RX, TX
-USBSabertoothSerial gSP(SWSerial);
+//SoftwareSerial SWSerial(3, 4);              // RX, TX
+//USBSabertoothSerial gSP(SWSerial);
+
+USBSabertoothSerial gSP(Serial1);   //Assign to Mega Hardware serial port
 
 //there are three motor controllers each with two motors. arrange these so they are front to rear in numerical order
 USBSabertooth       gSabertooth[3] = { USBSabertooth(gSP, 128), USBSabertooth(gSP, 129), USBSabertooth(gSP, 130) };
@@ -622,16 +625,35 @@ void SetSpeedo(int speed)
 void CheckHorn(void)
 {
 
-  int newval[3];
+  static int newval[3] = {0, 0, 0};
+  static int idx = 0;
 
-  newval[0] = digitalRead(BTN_HORN);
-  delay(10);
-  newval[1] = digitalRead(BTN_HORN);
-  delay(10);
-  newval[2] = digitalRead(BTN_HORN);
-
+  switch (idx)
+  {
+    case 1:
+      newval[0] = digitalRead(BTN_HORN);
+      if (newval[0] != newval[1])
+        idx = 0;                            //we are in the middle of a change so reset for three new samples
+      else
+        idx++;                              //1st two analog samples match, so advance ready for third
+      break;
+    case 2:
+      newval[1] = digitalRead(BTN_HORN);
+        if (newval[0] != newval[2])
+        idx = 0;                            //we are in the middle of a change so reset for three new samples
+      else
+        idx++;                              //1st two analog samples match, so advance ready for third
+      break;
+    case 3:
+      newval[2] = digitalRead(BTN_HORN);
+      if (newval[0] != newval[3])
+        idx = 0;                            //we are in the middle of a change so reset for three new samples
+      else
+        idx++;                              //1st two analog samples match, so advance ready for third
+      break;
+}
   //Set the horn to match the button state.
-  if (newval[0] == 0 && newval[1] == 0 && newval[2] == 0 && gHorn == 0)	//Horn button pressed, we have not seen this yet
+  if (newval[0] == 0 && gHorn == 0)	//Horn button pressed, we have not seen this yet
   {
     Serial.println(F("S:h:"));
     gHorn = 1;
@@ -643,7 +665,7 @@ void CheckHorn(void)
     ResetVigilanceWarning();		//horn press also resets the vigilance timer.
 
   }
-  else if (newval[0] == 1 && newval[1] == 1 && newval[2] == 1 && gHorn == 1)		//Horn button released, we have not seen this yet
+  else if (newval[0] == 1 && gHorn == 1)		//Horn button released, we have not seen this yet
   {
     Serial.println(F("S:j:"));
     gHorn = 0;
@@ -990,10 +1012,10 @@ void ConfigComms(void)
 
   //initialize Comms
   Serial.begin(RASPI_SERIAL_SPEED);  //Comms to Debug/Raspi
-  SWSerial.begin(MOTOR_SERIAL_SPEED);  //Motor Controller comms
-
+  //SWSerial.begin(MOTOR_SERIAL_SPEED);  //Motor Controller comms
+  Serial1.begin(MOTOR_SERIAL_SPEED);  //Motor Controller comms
   //give the serial lines time to come up before using them - wait three seconds
-  delay(3000);
+  delay(1000);
 
   gSabertooth[0].setGetTimeout(1000);
   gSabertooth[1].setGetTimeout(1000);
