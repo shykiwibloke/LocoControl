@@ -1,7 +1,7 @@
 /****************************************************
 **                                                 **
 **  Loco Control Stand version                     **/
-#define VERSION "3.0.1"
+#define VERSION "3.0.2"
 /*                                                 **
 **  Written by Chris Draper                        **
 **  Copyright (c) 2016                             **
@@ -27,7 +27,11 @@
 **
 ****************************************************/
 
-/* Recent Changes Log 
+/* Recent Changes Log
+ *  3.0.2
+16/07/2018: If 5 comms errors detected while getting motor current then reset comms.
+15/07/2018: Modified main loop to call amperage and Battery Voltage routine more efficiently when comms not needed for motor control
+15/-7/2018: Modified DoTimedIntervalChecks() to be less of a distraction/interference with serial
 23/06/2018: Start modifications to work on Mega - remove software serial in favour of hardware Serial1
  *  2.1.2
 26/05/2018: Modified Battery voltage routine to ignore timeouts (and not set battery to zero)
@@ -74,13 +78,12 @@ End Recent Changes Log  */
 #define MOTOR_SERIAL_SPEED	9600      //9600 for slower testing 
 #define RASPI_SERIAL_SPEED 19200     //faster speed over USB link
 #define SERIAL_BUFSIZE	50		  //Reserve 50 bytes for sending and receiving messages with the raspi
-#define MOTOR_TIMEOUT -32768   //value returned by Sabertooth library when comms fails
 #define MOTOR_RAMPING 2500      //smooths transition between notches
 
 #define NOTCH_DETENT 0     //used to adjust the notch boundaries
-#define NOTCH1 760 + NOTCH_DETENT     //below NOTCH1 is IDLE
-#define NOTCH2 790 + NOTCH_DETENT      //below NOTCH2 is NOTCH1
-#define NOTCH3 830 + NOTCH_DETENT      //below NOTCH3 is NOTCH2   etc
+#define NOTCH1 755 + NOTCH_DETENT     //below NOTCH1 is IDLE
+#define NOTCH2 785 + NOTCH_DETENT      //below NOTCH2 is NOTCH1
+#define NOTCH3 820 + NOTCH_DETENT      //below NOTCH3 is NOTCH2   etc
 #define NOTCH4 855 + NOTCH_DETENT
 #define NOTCH5 880 + NOTCH_DETENT
 #define NOTCH6 915 + NOTCH_DETENT
@@ -99,6 +102,8 @@ const int DIR_FWD = 1;
 const int DIR_REV = 2;
 
 //Sabertooth configuration defines
+const int MOTOR_TIMEOUT = -32768;   //value returned by Sabertooth library when comms fails. Must be const int to work reliably.
+
 #define MAX_NOTCH_SIZE      255            //the maximum value we can send for throttle or dynamic brake per notch position - 1
 
 //Sabertooth ports for ditch lights and headlights
@@ -219,8 +224,11 @@ void setup()
   ConfigDigitalPins();
 
   //Configure comms to motor controllers via software serial
-  ConfigComms();
+  ConfigComms(false);
 
+//Announce Our arrival
+  Serial.print(F("L:1:Loco Control Stand Ver: "));
+  Serial.println(F(VERSION));
 
   //configure the speedo output
 //  gSpeedo.attach(SPEEDO_PIN);
@@ -228,8 +236,8 @@ void setup()
   //call various subroutines to ensure internal state matches control panel
   initSystem();
 
-  //Check slow controls and heartbeat comms every five seconds
-  gtimer.setInterval(5000, DoTimedIntervalChecks);
+  //Check slow controls and heartbeat comms every fifteen seconds
+  gtimer.setInterval(15000, DoTimedIntervalChecks);
 
 }
 
@@ -249,12 +257,16 @@ void loop()
   {
 
     ResetVigilanceWarning();    //Control movement resets vigilance
+    CalcMotorNotchSize();       //check to see if user has changed the notch size
     EvaluateState();            //check to see if the control changes mean we are in a new state
     //and issue commands based on the changed controls - and also keep-alive heartbeats
   }
-
-  ServiceComms();                   // Comms Housekeeping route - handles reception of messages from Raspi etc
-
+  else 
+  {
+    GetMotorAmpsVolts();              //fetch and send one motor's current per call, and battery voltage once per 6 motor checks.
+    ServiceComms();                 // Comms Housekeeping route - handles reception of messages from Raspi etc
+  }
+  
   gtimer.run();                     //must be in main loop for timer to work
 
 }
@@ -275,7 +287,6 @@ void ReadInputs(void)
 
   if (digitalRead(BTN_VIGILANCE))   //Hitting vigilance button is considered a control change
   {
-    //Serial.println(F("L:2:Vigilance Manual Reset"));
     ResetVigilanceWarning();        //Just reset vigilance - not a control 'change'
   }
   
@@ -300,6 +311,9 @@ void EvaluateState(void)
   {
     //Stay there until the error clears
     Serial.println(F("L:1:EvalutateState Error Condition. Place Controls to Idle to clear"));
+    SetVigilanceWarning(true);
+    delay(50);
+    ResetVigilanceWarning();
     if ((gDirection == DIR_NONE) && (gThrottleNotch == 0) && (gDynamicNotch == 0))
     {
       //controls are safe and no errors detected with them
@@ -415,10 +429,10 @@ void CalcMotorNotchSize(void)
   //Reads the MaxSpeed value and set the ramp variables accordingly if it has changed.
 
   //read it, note: Arduino analog range is roughly half that of the sabertooth & this routine takes that into account
-  int newval = analogRead(MAX_SPEED_PIN) >> 4;
-
+  int newval = analogRead(MAX_SPEED_PIN) >> 3;
+ 
   newval += 128;			//shift up to 128-255 range
-
+ 
   //limit-check the value to fit range 128-255 before comparing it to last setting/using it
   if (newval > MAX_NOTCH_SIZE) newval = MAX_NOTCH_SIZE;
   if (newval < 128) newval = 128;
@@ -440,24 +454,13 @@ void CalcMotorNotchSize(void)
 //***************************************************
 void DoTimedIntervalChecks(void)
 {
-  //Stuff that only needs to be checked every five seconds or so Called by timer routine
+  //Stuff that only needs to be checked every fifteen seconds or so Called by timer routine
   static int callcount = 0;
 
-  //IF we are busy flashing the ditch lights - dont query the slow-to-answer variables from the motor controlers
-  // just exit and come back later.
-  if(gDitchFlashCount > 0)
-    return;
-
-  GetMotorCurrent();   //get and send to the raspi every five seconds
-
-  if (callcount == 3)    //stuff every 15 seconds
+   
+  if (++callcount == 2)
   {
-    GetBattery();
-  }
-  
-  if (callcount++ > 6)   //stuff that can be done every 30 seconds
-  {
-    CalcMotorNotchSize();
+
     callcount = 0;
   }
 
@@ -469,22 +472,18 @@ void DoTimedIntervalChecks(void)
   }
   else
   {
-    if (gVigilanceCount++ > 6)  //more than 30 seconds since a control was touched
+    if (++gVigilanceCount == 2)  //more than 30 seconds since a control was touched
     {
       //Serial.println(F("L:2:Vig Light"));
-      SetVigilanceWarning(false);
+      SetVigilanceWarning(false);   //turn light on now (no buzzer
     }
 
-    if (gVigilanceCount > 8)  //light been on for at least 10 seconds
+    if (gVigilanceCount == 3)  //light been on for at least 15 seconds
     {
       //Serial.println(F("L:2:Vig Buzzer"));
-      SetVigilanceWarning(true);   //buzzer goes off 10 seconds later
+      SetVigilanceWarning(true);  //Turn buzzer on
     }
 
-    if (gVigilanceCount > 10)
-    {
-      //todo - drop throttle to zero, amperage full, MaxSpeed none, go to error mode, send message to raspi
-    }
   }
 }
 
@@ -507,6 +506,7 @@ void SetMotorSpeed(void)
   gSabertooth[1].motor(2, speed);
   gSabertooth[2].motor(1, speed);     //3rd pair
   gSabertooth[2].motor(2, speed);
+
 }
 
 //***************************************************
@@ -630,28 +630,26 @@ void CheckHorn(void)
 
   switch (idx)
   {
-    case 1:
+    case 0:
       newval[0] = digitalRead(BTN_HORN);
+      idx++;                              //1st analog sample
+      return;
+    case 1:
+      newval[1] = digitalRead(BTN_HORN);
       if (newval[0] != newval[1])
         idx = 0;                            //we are in the middle of a change so reset for three new samples
       else
         idx++;                              //1st two analog samples match, so advance ready for third
-      break;
+      return;
     case 2:
-      newval[1] = digitalRead(BTN_HORN);
-        if (newval[0] != newval[2])
-        idx = 0;                            //we are in the middle of a change so reset for three new samples
-      else
-        idx++;                              //1st two analog samples match, so advance ready for third
-      break;
-    case 3:
       newval[2] = digitalRead(BTN_HORN);
-      if (newval[0] != newval[3])
-        idx = 0;                            //we are in the middle of a change so reset for three new samples
-      else
-        idx++;                              //1st two analog samples match, so advance ready for third
-      break;
-}
+      idx = 0;                              //reset whatever outcome of next test
+      if (newval[0] != newval[2])
+      {
+        return;                             //go take another three samples
+      }
+      break;                                //success - process received command
+  }
   //Set the horn to match the button state.
   if (newval[0] == 0 && gHorn == 0)	//Horn button pressed, we have not seen this yet
   {
@@ -698,14 +696,16 @@ void ResetVigilanceWarning(void)
 //Get State Routines
 //***************************************************
 
-void GetMotorCurrent()
+void GetMotorAmpsVolts()
 {
   
-  static int Motor = 0;
+  static int Motor = 1;
+  static int ErrCount = 0;
   int      rawvalue = 0;
 
   //Gets amps on cycle - for motor one, then two on second run etc.
-
+  if(gControlStatus != STATUS_ERROR && Serial1.availableForWrite() > 60 && Serial.availableForWrite() > 60)  //Only request from motor drivers if BOTH comms channels have the buffer space to cope
+  {
     switch(Motor)
     {
         case 1:
@@ -727,35 +727,44 @@ void GetMotorCurrent()
             rawvalue = gSabertooth[2].getCurrent((2), false);
             break;
         default:
-            rawvalue = gMotorCurrent[1] + gMotorCurrent[2] + gMotorCurrent[3] + gMotorCurrent[4] + gMotorCurrent[5] + gMotorCurrent[6];
+            Motor = 1;
+            ErrCount = 0;
+            GetBattery();               //Get the battery voltage once per scan of all the motor currents
+            return;
     }
       
- 
-    if (rawvalue < 10 || rawvalue == MOTOR_TIMEOUT) //if > 1 amps or timed out
+    if(rawvalue == MOTOR_TIMEOUT) //if timed out
     {
-      rawvalue = 0;
+        if(++ErrCount > 3)          //if more than three errors have been collected this run through all the motors
+        {
+            ConfigComms(true);          //Go reset comms
+            Serial.println(" ");
+            Serial.println("L:1:Comms RESET");
+            ErrCount = 0;
+        }
     }
     else
     {
-      rawvalue = rawvalue / 10;     //convert tenth of an amp to amps
+      if (rawvalue < 10)  //if > 1 amps, round it down (it will be just noise)
+      {
+        rawvalue = 0;
+      }
+      
+      if (rawvalue != gMotorCurrent[Motor])
+      {
+  
+        gMotorCurrent[Motor] = rawvalue;
+  
+        //send to display
+        Serial.print(F("M:"));
+        Serial.print(Motor);
+        Serial.print(":");
+        Serial.println(gMotorCurrent[Motor]);         //Motor Current sent in 10ths of an amp
+  
+      }
     }
-     
-    if (rawvalue != gMotorCurrent[Motor])
-    {
-
-      gMotorCurrent[Motor] = rawvalue;
-
-      //send to display
-      Serial.print(F("M:"));
-      Serial.print(Motor);
-      Serial.print(":");
-      Serial.println(gMotorCurrent[Motor]);
-
-    }
-    
-    Motor ++;
-    if (Motor > 6) Motor = 0;   
-
+    Motor++;
+  }
 }
 
 //***************************************************
@@ -915,7 +924,7 @@ int GetDynamic(void)
       break;
   }
 
-  newval[0] = CalcNotch(newval[0]);              //success to get here - three analogs match, not make it a notch
+  newval[0] = CalcNotch(newval[0]);              //success to get here - three analogs match, now make it a notch
 
 
   if (gDynamicNotch != newval[0])
@@ -923,7 +932,7 @@ int GetDynamic(void)
     //value has to have changed, and be measured as identical analog values three times to get here
     gControlsChanged = true;
 
-    if (gDirection == DIR_NONE && newval[1] > 0)
+    if (gDirection == DIR_NONE && newval[0] > 0)
     {
       CalcControlStatus(STATUS_ERROR, "ERROR: Dyn Set. Dir Neutral");
       return 1;
@@ -978,7 +987,7 @@ int GetThrottle(void)
       break;
   }
 
-  newval[0] = CalcNotch(newval[0]);              //success to get here - three analogs match, not make it a notch
+  newval[0] = CalcNotch(newval[0]);              //success to get here - three analogs match, now make it a notch
 
   if (gThrottleNotch != newval[0])                 //has notch changed?
   {
@@ -986,7 +995,7 @@ int GetThrottle(void)
 
     gControlsChanged = true;
 
-    if (gDirection == DIR_NONE && newval > 0)
+    if (gDirection == DIR_NONE && newval[0] > 0)
     {
       CalcControlStatus(STATUS_ERROR, "ERROR: Throttle Set. Dir Neutral");
       return 1;
@@ -1003,28 +1012,33 @@ int GetThrottle(void)
 //Serial Config & Handling routines
 //***************************************************
 
-void ConfigComms(void)
+void ConfigComms(bool IsReboot)
 {
   //Configures two RS232 data Streams - one for Debug/Raspi Comms and the other to talk to the motor controllers
 
   gRaspi_RxBuffer.reserve(SERIAL_BUFSIZE);
   gRaspi_TxBuffer.reserve(SERIAL_BUFSIZE);
 
+
   //initialize Comms
   Serial.begin(RASPI_SERIAL_SPEED);  //Comms to Debug/Raspi
   //SWSerial.begin(MOTOR_SERIAL_SPEED);  //Motor Controller comms
   Serial1.begin(MOTOR_SERIAL_SPEED);  //Motor Controller comms
   //give the serial lines time to come up before using them - wait three seconds
-  delay(1000);
 
+  if(IsReboot)
+  {
+    SendBeep(150, 5);    //Will also give a one second delay to allow comms to come up properly
+    gDitchFlashCount = 10;
+    gtimer.setTimer(400, FlashDitchlights, gDitchFlashCount);
+
+  }
   gSabertooth[0].setGetTimeout(1000);
   gSabertooth[1].setGetTimeout(1000);
   gSabertooth[2].setGetTimeout(1000);
   
+  SetMotorRamping(MOTOR_RAMPING);
 
-  //Announce Our arrival
-  Serial.print(F("L:1:Loco Control Stand Ver: "));
-  Serial.println(F(VERSION));
 }
 
 //***************************************************
@@ -1183,7 +1197,6 @@ void initSystem(void)
   //Ensure motor drivers are in a known minimal state
   //    GetTemperature();         //get and send to the raspi
   CalcMotorNotchSize();
-  SetMotorRamping(MOTOR_RAMPING);
   GetDynamicMode();
   GetBattery();
   CheckHeadlights();
