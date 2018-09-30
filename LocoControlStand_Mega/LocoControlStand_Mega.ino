@@ -78,12 +78,12 @@ End Recent Changes Log  */
 #define MOTOR_SERIAL_SPEED	9600      //9600 for slower testing 
 #define RASPI_SERIAL_SPEED 19200     //faster speed over USB link
 #define SERIAL_BUFSIZE	50		  //Reserve 50 bytes for sending and receiving messages with the raspi
-#define MOTOR_RAMPING 2500      //smooths transition between notches
+#define MOTOR_RAMPING 2400      //smooths transition between notches
 
 #define NOTCH_DETENT 0     //used to adjust the notch boundaries
-#define NOTCH1 755 + NOTCH_DETENT     //below NOTCH1 is IDLE
-#define NOTCH2 785 + NOTCH_DETENT      //below NOTCH2 is NOTCH1
-#define NOTCH3 820 + NOTCH_DETENT      //below NOTCH3 is NOTCH2   etc
+#define NOTCH1 750 + NOTCH_DETENT     //below NOTCH1 is IDLE
+#define NOTCH2 770 + NOTCH_DETENT      //below NOTCH2 is NOTCH1
+#define NOTCH3 825 + NOTCH_DETENT      //below NOTCH3 is NOTCH2   etc
 #define NOTCH4 855 + NOTCH_DETENT
 #define NOTCH5 880 + NOTCH_DETENT
 #define NOTCH6 915 + NOTCH_DETENT
@@ -174,6 +174,7 @@ bool gRaspiOK           = false;
 bool gControlsChanged   = false;
 int  gControlStatus     = 0;
 int  gMotorStartDelayID = 0;
+bool gGetMotorStatusFlag = false;
 
 //Control Inputs
 int  gThrottleNotch     = 0;	//Notch currently calculated for throttle
@@ -457,6 +458,7 @@ void DoTimedIntervalChecks(void)
   //Stuff that only needs to be checked every fifteen seconds or so Called by timer routine
   static int callcount = 0;
 
+  gGetMotorStatusFlag = true;   //set flag to get another round of measurements - if the serial buffers are empty
    
   if (++callcount == 2)
   {
@@ -704,7 +706,11 @@ void GetMotorAmpsVolts()
   int      rawvalue = 0;
 
   //Gets amps on cycle - for motor one, then two on second run etc.
-  if(gControlStatus != STATUS_ERROR && Serial1.availableForWrite() > 60 && Serial.availableForWrite() > 60)  //Only request from motor drivers if BOTH comms channels have the buffer space to cope
+  if(gControlStatus != STATUS_ERROR 
+     && Serial1.availableForWrite() > 60 
+     && Serial.availableForWrite() > 60
+     && gGetMotorStatusFlag == true
+     && gControlsChanged == false)  //Only request from motor drivers if BOTH comms channels have the buffer space to cope AND there are no commands being processed AND only every 15seconds
   {
     switch(Motor)
     {
@@ -730,12 +736,13 @@ void GetMotorAmpsVolts()
             Motor = 1;
             ErrCount = 0;
             GetBattery();               //Get the battery voltage once per scan of all the motor currents
+            gGetMotorStatusFlag = false;  //done a read through, wait for at least another 15 seconds.
             return;
     }
       
     if(rawvalue == MOTOR_TIMEOUT) //if timed out
     {
-        if(++ErrCount > 3)          //if more than three errors have been collected this run through all the motors
+        if(++ErrCount > 4)          //if more than four errors have been collected this run through all the motors
         {
             ConfigComms(true);          //Go reset comms
             Serial.println(" ");
@@ -745,10 +752,10 @@ void GetMotorAmpsVolts()
     }
     else
     {
-      if (rawvalue < 10)  //if > 1 amps, round it down (it will be just noise)
-      {
-        rawvalue = 0;
-      }
+      //if (rawvalue < 10)  //if > 1 amps, round it down (it will be just noise)
+      //{
+      //  rawvalue = 0;
+      //}
       
       if (rawvalue != gMotorCurrent[Motor])
       {
@@ -979,7 +986,7 @@ int GetThrottle(void)
     case 2:
       newval[2] = analogRead(THROTTLE_PIN);
       idx = 0;                                //completed 3 samples. start again either way
-      if (newval[0] != newval[1] || newval[1] != newval[2])
+      if (newval[0] != newval[1] || newval[0] != newval[2])
       {
         return 0;                            //Still in the middle of a change so reset for three new samples
 
@@ -994,6 +1001,7 @@ int GetThrottle(void)
     //change has happened, and settled down sufficient to get three identical readings in order to get here
 
     gControlsChanged = true;
+    Serial.println(newval[1]);
 
     if (gDirection == DIR_NONE && newval[0] > 0)
     {
