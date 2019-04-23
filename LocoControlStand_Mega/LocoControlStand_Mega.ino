@@ -1,7 +1,7 @@
 /****************************************************
 **                                                 **
 **  Loco Control Stand version                     **/
-#define VERSION "3.3.1"
+#define VERSION "3.3.2"
 /*                                                 **
 **  Written by Chris Draper                        **
 **  Copyright (c) 2016                             **
@@ -28,6 +28,9 @@
 ****************************************************/
 
 /* Recent Changes Log
+ *  3.3.2
+17/04/2019: Fixed bug in amperage fetch routine
+17/04/2019: Increased serial speed to Raspberry Pi to 115200
  *  3.3.0
 18/12/2018: Modified direction switch detection to avoid it ignoring fast changes between reverse and forward.
 13/12/2018: Initial cut of Dynamic Mode coded in to GetThrottle, GetDynamic, SetDynamicBrake, and Evaluate state subroutines
@@ -153,7 +156,7 @@ J7 - 16 pin header to cover direction and encoders
 #define PORT_ALL_PULLUP			255			//Constant used to set all 8 internal pullup resistors for port 
 
 #define MOTOR_SERIAL_SPEED	9600      //9600 initial, up the speed once wiring changes tested
-#define RASPI_SERIAL_SPEED 	19200			//faster speed over USB link
+#define RASPI_SERIAL_SPEED 	115200		//faster speed over USB link
 #define MAX_NOTCHES					9					//allow for zero and 8 notches - Applies to Throttle and Dynamic
 #define MAX_NOTCH_SIZE      255       //the maximum value we can send for throttle or dynamic brake per notch position - 1
 
@@ -872,11 +875,13 @@ void GetMotorAmpsVolts()
         case 2:
             rawvalue = gSabertooth[1].getCurrent((1), false);
             Serial.print("M:2:");
-						Serial.println(rawvalue);         //Motor Current sent in 10ths of an ampbreak;
+						Serial.println(rawvalue);         //Motor Current sent in 10ths of an amp
+						break;
         case 3:
             rawvalue = gSabertooth[1].getCurrent((2), false);
             Serial.print("M:3:");
-						Serial.println(rawvalue);         //Motor Current sent in 10ths of an ampbreak;
+						Serial.println(rawvalue);         //Motor Current sent in 10ths of an amp
+						break;
         case 4:
             rawvalue = gSabertooth[2].getCurrent((1), false);
 						Serial.print("M:4:");
