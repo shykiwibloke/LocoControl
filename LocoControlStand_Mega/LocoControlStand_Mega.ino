@@ -1,7 +1,7 @@
 /****************************************************
 **                                                 **
 **  Loco Control Stand version                     **/
-#define VERSION "3.3.2"
+#define VERSION "3.3.3"
 /*                                                 **
 **  Written by Chris Draper                        **
 **  Copyright (c) 2016                             **
@@ -28,6 +28,9 @@
 ****************************************************/
 
 /* Recent Changes Log
+ *  3.3.3
+25/04/2019: Rewrite of Amperage measurement to Modified Moving Average method (Measurements were too volitile)
+25/04/2019: Modified Serial Speed from 9600 to 38400 for motor controllers
  *  3.3.2
 17/04/2019: Fixed bug in amperage fetch routine
 17/04/2019: Increased serial speed to Raspberry Pi to 115200
@@ -155,7 +158,7 @@ J7 - 16 pin header to cover direction and encoders
 #define PORT_DIR_OUTPUT 		255			//Constant used to set Direction Register for output use (all 8 buts at once)
 #define PORT_ALL_PULLUP			255			//Constant used to set all 8 internal pullup resistors for port 
 
-#define MOTOR_SERIAL_SPEED	9600      //9600 initial, up the speed once wiring changes tested
+#define MOTOR_SERIAL_SPEED	38400      //for Motor Controllers
 #define RASPI_SERIAL_SPEED 	115200		//faster speed over USB link
 #define MAX_NOTCHES					9					//allow for zero and 8 notches - Applies to Throttle and Dynamic
 #define MAX_NOTCH_SIZE      255       //the maximum value we can send for throttle or dynamic brake per notch position - 1
@@ -210,8 +213,8 @@ int  gDirection         	= 0;																	//Forward, Reverse, Neutral ( See 
 int  gBattery           	= 0;																	//Current Battery Voltage
 int	 gHorn              	= 0;																	//Horn sounding 0 = no, 1 = yes
 int  gHeadlights        	= 0;																	//Headlights off, dip, full (0,1,2 respectively)
-int  gMotorAmps[6]  		= {0};																  //last read motor Amperage for individual motorsint  gMotorAmps[6]  		= {0};																//last read motor current for individual motors
-int  gMotorAmpVariance[6] = {0};																//last calculated speed offset for motors
+int  gMotorAmps[6]  		  = {0};																  //last read motor Amperage for individual motorsint  gMotorAmps[6]  		= {0};																//last read motor current for individual motors
+//int  gMotorAmpVariance[6] = {0};																//last calculated speed offset for motors
 int  gMotorValue[6]				= {0};																//Contains the last set of values output to motors
 int	 gVigilanceCount    	= 0;																	//Timer count for the Vigilance Alarm
 int  gDitchFlashCount   	= 0;																	//Count for flashing the ditch lights when the horn is sounded
@@ -577,14 +580,14 @@ void SetMotorSpeed(void)
 		for(int f = 0; f < 6; f++)
 		{
 			gMotorValue[f] = 0;
-			gMotorAmpVariance[f] = 0;					//Dampen out any values likely to interfere with zeroing motors.
+	//		gMotorAmpVariance[f] = 0;					//Dampen out any values likely to interfere with zeroing motors.
 		}
 	}
 	else
 	{
 		for(int f = 0; f < 6; f++)
 		{
-			gMotorValue[f] = speed + gMotorAmpVariance[f];
+			gMotorValue[f] = speed; // + gMotorAmpVariance[f];
 		}
 	}
 	//send the commands to the motor controllers if enabled
@@ -605,7 +608,7 @@ void SetMotorSpeed(void)
 			Serial.println("**************");
 		}
 	}
-	else    //calculate and set the real speed
+	else    //Set the real speed
 	{
 		gSabertooth[0].motor(1, gMotorValue[0]);     //first pair
 		gSabertooth[0].motor(2, gMotorValue[1]);
@@ -628,7 +631,8 @@ void SetDynamicBrake()
   //Note this must stay in the same direction of travel for Sabertooth braking to work properly
 
   //Calculate output values including variations to compensate for motor differences
-	for(int f = 0; f < 6; f++) gMotorValue[f] = gMotorAmpVariance[f] - brake;
+	for(int f = 0; f < 6; f++) 
+		gMotorValue[f] -= brake;
 	 
   if (!gMotorsEnabled)
 	{	
@@ -846,7 +850,11 @@ void ResetVigilanceWarning(void)
 void GetMotorAmpsVolts()
 {
   
-  static int motor = 0;
+	float movingAverage[6] = {0};				//one for each motor (has to be preserved from one run to the next)
+	float movingAverageSum[6] = {0};
+	const int averageCount = 200;
+				
+	static int motor = 0;
   static int ErrCount = 0;
   int      rawvalue = 0;
 
@@ -856,47 +864,34 @@ void GetMotorAmpsVolts()
      && Serial1.availableForWrite() > 50 
      && gGetMotorStatusFlag == true
      && gControlsChanged == false)  //Only request from motor drivers if comms channel has the buffer space to cope 
-																		//AND there are no commands being processed
+																		//AND there are no control commands being processed
 																		//AND status is something that can use the current measurements (not Error or Idle)
-																		//(also routine only called for one motor every 1/4 second)
   {
     switch(motor)
     {
         case 0:
             rawvalue = gSabertooth[0].getCurrent((1), false);
-						Serial.print("M:0:");
-						Serial.println(rawvalue);         //Motor Current sent in 10ths of an amp
             break;
         case 1:
             rawvalue = gSabertooth[0].getCurrent((2), false);
-						Serial.print("M:1:");
-						Serial.println(rawvalue);         //Motor Current sent in 10ths of an amp
             break;
         case 2:
             rawvalue = gSabertooth[1].getCurrent((1), false);
-            Serial.print("M:2:");
-						Serial.println(rawvalue);         //Motor Current sent in 10ths of an amp
 						break;
         case 3:
             rawvalue = gSabertooth[1].getCurrent((2), false);
-            Serial.print("M:3:");
-						Serial.println(rawvalue);         //Motor Current sent in 10ths of an amp
 						break;
         case 4:
             rawvalue = gSabertooth[2].getCurrent((1), false);
-						Serial.print("M:4:");
-						Serial.println(rawvalue);         //Motor Current sent in 10ths of an amp
             break;
         case 5:
             rawvalue = gSabertooth[2].getCurrent((2), false);
-						Serial.print("M:5:");
-						Serial.println(rawvalue);         //Motor Current sent in 10ths of an amp
             break;
         default:
 						motor = 0;
             ErrCount = 0;
-						CalcMotorAmpVariances();						//Use latest values to ensure motors pulling equally
-            gGetMotorStatusFlag = false;  //done a read through, wait for at least another 15 seconds.
+//						CalcMotorAmpVariances();						//Use latest values to ensure motors pulling equally
+//            gGetMotorStatusFlag = false;  //done a read through, wait for at least another 15 seconds.
             return;
     }
       
@@ -913,13 +908,26 @@ void GetMotorAmpsVolts()
     }
     else
     {
+			ErrCount = 0;				//Reset Error count as we got here OK (might have had a timeout and recovered)
 
-	if (rawvalue != gMotorAmps[motor])
-      {
-  
-        gMotorAmps[motor] = rawvalue;
-  
-      }
+			// Remove previous movingAverage from the sum
+			movingAverageSum[motor] -= movingAverage[motor];
+
+			// Replace it with the current sample
+			movingAverageSum[motor] += rawvalue;
+
+			// Recalculate movingAverage
+			movingAverage[motor] = movingAverageSum[motor] / averageCount;
+
+			if ((int) movingAverage[motor] != gMotorAmps[motor])    //Only update and send if value change > 1/10th amp
+			{
+					gMotorAmps[motor] = (int) movingAverage[motor]; //anything less than 10th of an amp will be zeroed
+					Serial.print("M:");
+					Serial.print(motor);
+					Serial.print(":");
+					Serial.println(gMotorAmps[motor]);         //Motor Current sent in 10ths of an amp
+			}
+
     }
     motor++;
   }
@@ -952,7 +960,7 @@ void GetBattery(void)
 //***************************************************
 //MedianTest
 //***************************************************
-
+/*
 void MedianTest() {
 
    int a[] = {150,200,0};
@@ -976,8 +984,9 @@ void MedianTest() {
   
 
 }
+*/
 //***************************************************
-
+/*
 void CalcMotorAmpVariances(void)
 {
 	//Routine to examine last lot of current readings and alter motor offsets so all pull their weight equally	
@@ -1020,7 +1029,7 @@ void CalcMotorAmpVariances(void)
 			Serial.println(" ");
 		}
 	}
-
+*/
 			//***************************************************
 bool GetMotorMode(void)
 {
@@ -1323,7 +1332,7 @@ int GetSpeed(void)
 //***************************************************
 //SortIntArray - sorts the array of integers a[] with total count of n elements
 //***************************************************
- 
+ /*
 void SortIntArray(int a[],int n) {
 
    int i,j,temp;
@@ -1361,7 +1370,7 @@ void SwapInts(int *p,int *q) {
    *q=t;
 
 }
-
+*/
 
 //***************************************************
 //Serial Config & Handling routines
