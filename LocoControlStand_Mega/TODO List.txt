@@ -1,0 +1,14 @@
+TODO List for LocoControl Revision
+
+
+1) Alter GetDynamic and GetThrottle so they return the notch read.
+2) Create new routine EvaluateLevers() that looks at both Throttle and Dynamic at the same time to get accurate assessment based on history
+3) Create variables to hold previous assessment(s) of notch/brake/mode etc
+4) Create variables to hold new/recommended assessments of notch/brake/mode etc
+5) Rewrite EvaluateState() so it does exactly that - focus on state only. (based on previous assessment and recommendations)
+
+Amperage Calculation
+1) Try this experiment:- modify so takes X samples of same motor quickly and focus on getting that right
+   - anything learnt goes into the final routine design.
+2) Try the grab 'peak' and multiply by the throttle %
+3) Try assessing majority of readings as positive or negative in determining sign
