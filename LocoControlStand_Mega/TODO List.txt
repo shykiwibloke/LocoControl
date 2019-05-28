@@ -1,9 +1,7 @@
 TODO List for LocoControl Revision
 
-1) TEST - Throttle not working in reverse when in dynamic mode
-2) Stop acceleration if throttle closed b4 speed reached - takes 18 seconds to get to full throttle from idle
-3) Send message to display for Dynamic Mode warning light and motors enabled
-
+1) FIXED - Throttle not working in reverse when in dynamic mode
+2) OK - Stop acceleration if throttle closed b4 speed reached - takes 18 seconds to get to full throttle from idle
 
 
 Amperage Calculation

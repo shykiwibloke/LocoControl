@@ -1,7 +1,7 @@
 /****************************************************
 **                                                 **
 **  Loco Control Stand version                     **/
-#define VERSION "4.2.0"
+#define VERSION "4.2.1"
 /*                                                 **
 **  Written by Chris Draper                        **
 **  Copyright (c) 2016 - 2019                      **
@@ -1022,11 +1022,13 @@ bool GetMotorMode(void)
 		Serial.print("L:4: Motor Outputs ");
 		if(temp)
 		{
-			Serial.println("Enabled");
+			Serial.println("Enabled");  //Send command for panel indicator light
+			Serial.println("E:1:");
 		}
 		else
 		{
 			Serial.println("Disabled");
+			Serial.println("E:0:");
 		}
 	  gMotorsEnabled = temp;
 	}
@@ -1046,10 +1048,12 @@ bool GetDynamicMode(void)
 		if(temp)
 		{
 			Serial.println("Enabled");
+			Serial.println("B:1:");			//Send command for panel indicator light
 		}
 		else
 		{
 			Serial.println("Disabled");
+			Serial.println("B:0:");
 		}
 	  gDynamicEnabled = temp;
 	}
