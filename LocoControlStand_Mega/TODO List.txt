@@ -1,7 +1,8 @@
 TODO List for LocoControl Revision
 
 1) FIXED - Throttle not working in reverse when in dynamic mode
-2) OK - Stop acceleration if throttle closed b4 speed reached - takes 18 seconds to get to full throttle from idle
+2) FIXED - Stop acceleration if throttle closed b4 speed reached - takes 18 seconds to get to full throttle from idle
+3) DONE - every 15 seconds - Find a way to send occaisonal refreshes to raspi of Dynamic and Motor Enabling switches
 
 
 Amperage Calculation

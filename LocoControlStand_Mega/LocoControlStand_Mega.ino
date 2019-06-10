@@ -1,7 +1,7 @@
 /****************************************************
 **                                                 **
 **  Loco Control Stand version                     **/
-#define VERSION "4.2.1"
+#define VERSION "4.2.6"
 /*                                                 **
 **  Written by Chris Draper                        **
 **  Copyright (c) 2016 - 2019                      **
@@ -30,6 +30,13 @@
 //#define LOG_LEVEL_4								//if defined then debug info will be output to the console port
 
 /* Recent Changes Log
+ *	4.2.6
+10/06/2019: Fixed bad Vigilance Warning message sent to Raspi
+ *  4.2.4
+29/05/2019: Motor and Dynamic Switches now send immediately they are changed as well as every 15 seconds. 
+ *  4.2.2
+29/05/2019: Altered GetDynamicMode and GetMotorMode to split indicator send from reading switch so 10 sec update sent to raspi
+29/05/2019: Experimental version of Max/Min Motor Amp calc for research purposes
  *  4.2.0
 27/05/2019: Throttle set to work in NORMAL mode in reverse even when in dynamic mode.
 27/05/2019: Now stops acceleration if throttle closed b4 speed reached.
@@ -232,7 +239,7 @@ direction_t gDirection   	= DIR_NONE;								//Forward, Reverse, Neutral ( See D
 int  gBattery           	= 0;											//Current Battery Voltage
 int	 gHorn              	= 0;											//Horn sounding 0 = no, 1 = yes
 int  gHeadlights        	= 0;											//Headlights off, dip, full (0,1,2 respectively)
-//int  gMotorAmps[6]  		  = {0};				HACK						//last read motor Amperage for individual motorsint  gMotorAmps[6]  		= {0};																//last read motor current for individual motors
+int  gMotorAmps[6]  		  = {0};										//last read motor Amperage for individual motorsint  gMotorAmps[6]  		= {0};																//last read motor current for individual motors
 int	 gVigilanceCount    	= 0;											//Timer count for the Vigilance Alarm
 int  gDitchFlashCount   	= 0;											//Count for flashing the ditch lights when the horn is sounded
 
@@ -417,7 +424,7 @@ void EvaluateState(void)
 			TriggerVigilanceWarning(true);
 			delay(50);
 			ResetVigilanceWarning();
-			ChangeControlState(CONTROL_STATE_ERROR,"EvaluateState Error Mode Cauught");
+			ChangeControlState(CONTROL_STATE_ERROR,"EvaluateState Error Mode Caught");
 			break;
 	}
 			 
@@ -471,13 +478,12 @@ void CalcMotorNotchSize(void)
   //has it changed?
   if (gMotorNotchSize != newval)
   {
-   //set it
+		//set it
     gMotorNotchSize = newval;
 
-	//and Advise
-	Serial.print("L:4:NotchSize=");
-    Serial.println(gMotorNotchSize);
-
+		//and Advise
+		Serial.print("L:4:NotchSize=");
+		Serial.println(gMotorNotchSize);
   }
 }
 
@@ -505,6 +511,8 @@ void DoQuarterSecondChecks(void)
 
 	if (digitalRead(BTN_VIGIL_PIN))   	//Hitting vigilance button (active high) is not a control change, but should reset it
 	{
+		
+    Serial.println("L:2:Vigilance Reset");
 		ResetVigilanceWarning();        	//Just reset vigilance - not a control 'change' that needs further analysis
 	}
 
@@ -515,6 +523,8 @@ void DoTenSecondChecks(void)
   //Stuff that only needs to be checked every Ten seconds or so Called by timer routine
   
   GetBattery();                 //Get the battery voltage
+	SendMotorMode();
+	SendDynamicMode();
 
   //Calculate Vigilance warnings
 
@@ -845,7 +855,6 @@ void ResetVigilanceWarning(void)
   digitalWrite(VIGIL_EN_PIN, LOW);
   digitalWrite(BUZZER_PIN, LOW);
   gVigilanceCount = 0;
-	Serial.println("Vilgilance Reset");
 
 }
 /***************************************************/
@@ -862,12 +871,14 @@ void GetMotorAmps()
 	//Do something to determine which to believe (analyse this with tests)
 	//take 0.707 of the chosen max as the rms reading for that motor.
 	
-	int maxPos[6];
-	int maxNeg[6];
-	static int motor = 0;
-  int      	 rawvalue = 0;
-	static int samplecount = 0;
 	#define MAX_SAMPLE_COUNT 10
+	
+	static int	maxPos 			= 0;
+	static int	maxNeg 			= 0;
+	static int 	motor 			= 0;
+	static int 	samplecount = 0;
+  int      	 	rawvalue 		= 0;
+
 	
   if(gControlState != CONTROL_STATE_ERROR
 		 && gControlState != CONTROL_STATE_IDLE
@@ -880,11 +891,30 @@ void GetMotorAmps()
 		
 		if(rawvalue != MOTOR_TIMEOUT)
     {
-			if(rawvalue > maxPos[motor]) maxPos[motor] = rawvalue;	//capture highest value for this run
-			if(rawvalue < maxNeg[motor]) maxNeg[motor] = rawvalue;
+			if(rawvalue > maxPos) maxPos = rawvalue;	//capture highest value for this run
+			if(rawvalue < maxNeg) maxNeg = rawvalue;	//capture lowest value for this run
 			
-			if(samplecount++ > MAX_SAMPLE_COUNT)
+			if(++samplecount > MAX_SAMPLE_COUNT)
 			{
+				
+				if(maxPos >= abs(maxNeg))
+				{
+					gMotorAmps[motor] = maxPos;
+				}
+				else
+				{
+					gMotorAmps[motor] = maxNeg;
+				}
+				
+				Serial.print("M:");
+				Serial.print(motor);
+				Serial.print(":");
+				Serial.println(gMotorAmps[motor]);         //Motor Current sent in 10ths of an amp
+
+				samplecount = 0;
+				maxPos = 0;
+				maxNeg = 0;
+				if(++motor > 5)  motor = 0;						//reset to first motor and do another run
 				
 			}
 		}
@@ -996,24 +1026,18 @@ void GetBattery(void)
   temp = gSabertooth[0].getBattery(1, false);
   if (temp != MOTOR_TIMEOUT)
   {
-
-    //todo - maybe reset comms if battery timeout?
-      
-    if (temp != gBattery)
-    {
-      //only send battery if it changes
-      gBattery = temp;
+    gBattery = temp;
   
-      Serial.print("V:1:");
-      Serial.println(gBattery);
-    }
+    Serial.print("V:1:");
+    Serial.println(gBattery);
   }
 }
 
 /***************************************************/
-bool GetMotorMode(void)
+void GetMotorMode(void)
 {
 	/* Get Motor Mode looks at the switch and sets the global variable gMotorsEnabled
+			  NB: Can only be changed when loco in IDLE
 	*/
 	
 	bool temp = !digitalRead(MOTOR_SW_PIN);   //Switch pulls line low to activate DYn Mode.
@@ -1023,22 +1047,35 @@ bool GetMotorMode(void)
 		if(temp)
 		{
 			Serial.println("Enabled");  //Send command for panel indicator light
-			Serial.println("E:1:");
 		}
 		else
 		{
 			Serial.println("Disabled");
-			Serial.println("E:0:");
 		}
 	  gMotorsEnabled = temp;
+		SendMotorMode();
 	}
-	return temp;
 }
 
 /***************************************************/
-bool GetDynamicMode(void)
+void SendMotorMode(void)
+
+//sends the current mode to the display - separated from get so it can be sent when loco in motion as a refresh
+{
+	if(gMotorsEnabled)
+		{
+			Serial.println("E:1:");
+		}
+		else
+		{
+			Serial.println("E:0:");
+		}
+}
+/***************************************************/
+void GetDynamicMode(void)
 {
 	/* Get Dynamic Mode looks at the switch and sets the global variable gDynamicEnabled
+		  NB: Can only be changed when loco in IDLE
 	*/
 	
 	bool temp = !digitalRead(DYN_SW_PIN);   //sw pulls line low to enable Dynamic Mode.
@@ -1048,16 +1085,29 @@ bool GetDynamicMode(void)
 		if(temp)
 		{
 			Serial.println("Enabled");
-			Serial.println("B:1:");			//Send command for panel indicator light
 		}
 		else
 		{
 			Serial.println("Disabled");
-			Serial.println("B:0:");
 		}
 	  gDynamicEnabled = temp;
+		SendDynamicMode();
 	}
-	return temp;
+}
+
+/***************************************************/
+void SendDynamicMode(void)
+
+//sends the current mode to the display - separated from get so it can be sent when loco in motion as a refresh
+{
+	if(gDynamicEnabled)
+		{
+			Serial.println("B:1:");
+		}
+		else
+		{
+			Serial.println("B:0:");
+		}
 }
 
 /***************************************************/
@@ -1460,6 +1510,7 @@ void initSystem(void)
   //Ensure motor drivers are in a known minimal state
   CalcMotorNotchSize();
   GetDynamicMode();
+	GetMotorMode();
   GetBattery();
   CheckHeadlights();
 
