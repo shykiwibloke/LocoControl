@@ -1,7 +1,7 @@
 /****************************************************
 **                                                 **
 **  Loco Control Stand version                     **/
-#define VERSION "4.2.6"
+#define VERSION "4.2.7"
 /*                                                 **
 **  Written by Chris Draper                        **
 **  Copyright (c) 2016 - 2019                      **
@@ -30,6 +30,8 @@
 //#define LOG_LEVEL_4								//if defined then debug info will be output to the console port
 
 /* Recent Changes Log
+ *  4.2.7
+16/12/2019: Reduced normal ramping slightly to improve shunting performance.
  *	4.2.6
 10/06/2019: Fixed bad Vigilance Warning message sent to Raspi
  *  4.2.4
@@ -147,7 +149,7 @@ const byte gEncoderMap[256] = {
 #define MOTOR_SW_PIN		12			//D12 - Motor switch - if true, enable motor outputs, false for testing
 //D13 -15 spare
 //D16&D17 - reserved for RS232 Serial2 (Reserved for future comms)
-//D18&D19 - reserved for RS232 Serial1 (Sabertooth Motor Controllers)
+//D18&D19 - reserved for RS232 Serial1 (Used for comms to Sabertooth Motor Controllers)
 //D20-41 spare
 #define DIR_FWD_PIN 		51      //Microswitch - internal pullup - active low Pin 51 on Mega is PB0
 #define DIR_REV_PIN 		53      //Microswitch - internal pullup - active low Pin 53 on Mega is PB2
@@ -208,7 +210,7 @@ typedef enum {												//Used to formalise condition of reverser microswitchs
 } direction_t;
 
 //Sabertooth configuration defines
-const int MOTOR_STD_RAMPING =	2400;				//Normal smoothing transition between notches
+const int MOTOR_STD_RAMPING =	2300;				//Normal smoothing transition between notches
 const int MOTOR_EMG_RAMPING = 2000;			  //Smoothing when in emergency
 const int MOTOR_TIMEOUT 	  = SABERTOOTH_GET_TIMED_OUT;			//value returned by Sabertooth library when comms fails. Must be const int to work reliably.
 
@@ -369,8 +371,10 @@ void EvaluateState(void)
 			{
 				//check if we were in the middle of acceleration to a much higher notch, and cut to wherever we are currently.
 				
-				SetMotorSpeed(gSabertooth[0].get('M',1));			//Get speed at this exact moment and set it as 'high tide' - one motor is enough
+				int currentSpeed = gSabertooth[0].get('M',1);         //Get speed at this exact moment
+				if(currentSpeed = MOTOR_TIMEOUT) currentSpeed = 0;		//Only comes into play when motors are disabled
 				
+				SetMotorSpeed(currentSpeed);			 //and set it as 'high tide' for coasting or dynamic
 				
 				//	- Issue sound commands to cut dynamic sounds and engine to idle
 				SendMotorSound(0);
@@ -897,7 +901,7 @@ void GetMotorAmps()
 			if(++samplecount > MAX_SAMPLE_COUNT)
 			{
 				
-				if(maxPos >= abs(maxNeg))
+				if(maxPos + 10 >= abs(maxNeg))		//Add one amp (10) to positive to bias it toward current consumption.
 				{
 					gMotorAmps[motor] = maxPos;
 				}
@@ -923,107 +927,12 @@ void GetMotorAmps()
 	
 	
 }
-/*
-{
-	float movingAverage[6] = {1};				//one for each motor (has to be preserved from one run to the next)
-	float movingAverageSum[6] = {1};
-	const int AVERAGE_COUNT = 99;				//TODO - change to header const?
-				
-	static int motor = 0;
-  static int ErrCount = 0;
-  int      	 rawvalue = 0;
-
-  //Gets amps on cycle - for motor one, then two on second run etc.
-  if(gControlState != CONTROL_STATE_ERROR
-		 && gControlState != CONTROL_STATE_IDLE
-     && Serial1.availableForWrite() > 50 
-     && gControlsChanged == false)  //Only request from motor drivers if comms channel has the buffer space to cope 
-																		//AND there are no control commands being processed
-																		//AND status is something that can use the current measurements (not Error or Idle)
-  {
-    switch(motor)
-    {
-        case 0:
-            rawvalue = gSabertooth[0].getCurrent((1), false);
-            break;
-        case 1:
-            rawvalue = gSabertooth[0].getCurrent((2), false);
-            break;
-        case 2:
-            rawvalue = gSabertooth[1].getCurrent((1), false);
-						break;
-        case 3:
-            rawvalue = gSabertooth[1].getCurrent((2), false);
-						break;
-        case 4:
-            rawvalue = gSabertooth[2].getCurrent((1), false);
-            break;
-        case 5:
-            rawvalue = gSabertooth[2].getCurrent((2), false);
-            break;
-        default:
-						motor = 0;
-            ErrCount = 0;
-
-            return;
-    }
-      
-    if(rawvalue == MOTOR_TIMEOUT && gMotorsEnabled) //if motor comms is supposed to be in use and timed out
-    {
-        if(++ErrCount > 4)          //if more than four errors have been collected this run through all the motors
-        {
-            ConfigComms(true);          //Go reset comms
-            Serial.println(" ");
-            Serial.println("L:1:Comms RESET");
-            ErrCount = 0;
-        }
-				
-    }
-    else
-    {
-			ErrCount = 0;				//Reset Error count as we got here OK (might have had a timeout and recovered)
-
-			if (rawvalue -9 && rawvalue < 9) rawvalue = 0;
-			//experimental rms stuff
-			rawvalue = rawvalue * rawvalue;
-			
-			// Remove previous movingAverage from the sum
-			movingAverageSum[motor] -= movingAverage[motor];
-
-			// Replace it with the current sample
-			movingAverageSum[motor] += (movingAverage[motor]*.875) + (rawvalue*0.125);
-
-			// Recalculate movingAverage incl guard for divide by zero
-			if(movingAverageSum[motor] == 0)
-				movingAverageSum[motor] = 1;
-			else
-				movingAverage[motor] = sqrt(movingAverageSum[motor] / AVERAGE_COUNT);
-			
-
-			if ((int) movingAverage[motor] != gMotorAmps[motor])    //Only update and send if value change > 1/10th amp
-			{
-					
-					gMotorAmps[motor] = (int) movingAverage[motor]; //anything less than 10th of an amp will be zeroed
-					Serial.print("M:");
-					Serial.print(motor);
-					Serial.print(":");
-					Serial.println(gMotorAmps[motor]);         //Motor Current sent in 10ths of an amp
-			}
-
-    }
-    motor++;
-  }
-
-}
-*/
 /***************************************************/
 void GetBattery(void)
 {
-
-  int temp = 0;
   
   //Battery should be the same for all controllers - so only have to read one
-  temp = gSabertooth[0].getBattery(1, false);
+  int temp = gSabertooth[0].getBattery(1, false);
   if (temp != MOTOR_TIMEOUT)
   {
     gBattery = temp;
@@ -1339,6 +1248,14 @@ void GetThrottle(void)
   }
 
 	debounce[0] = debounce[0] - (gThrZeroOffset);     //All the debounce samples are the same so use the first one
+	
+	/*
+	/16/12/2019 - fine tuning on throttle notches as follows:
+	
+	Notch 1 changed from 5 to 4
+	Notch 2 changed from 7 to 6
+	Notch 3 changed from 10 to 9
+	*/
 	
 	if			(debounce[0] > -2) notch = 0;			//Idle					//NB: Values DIFFERENT for Throttle to Dynamic
 	else if (debounce[0] > -5) notch = 1;     //Notch 1

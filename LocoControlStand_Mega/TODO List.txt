@@ -6,8 +6,16 @@ TODO List for LocoControl Revision
 
 
 Amperage Calculation
-PENDING response from Motor Controller Manufacturer on potential bug in driver
+CLOSED response from Motor Controller Manufacturer on potential bug in driver - NO USEFUL RESPONSE
 
 1) Try the grab 'peak+' & 'peak-' and determine which is most likey depending on controls and take at 0.707
-2) Think about changing dynamic notches so 2 through seven are more than 1/16 apart 
+2) Think about changing dynamic notches so 2 through seven are more than fixed 1/16 apart 
     - an exponential scale so 7 = gradual stop OR setup notches 5-7 as auto decrement?
+3) Look at shortening emergency motor ramping (trials)
+4) Introduce Short ramping between idle and notch one only. 
+Or lengthen ramping the higher the notch. 
+Need better reaction time for nudging - new switch for 'shunt' mode? or disable dynamic changes things?
+
+5) If Sound bugs continue - allocate specific channels 
+   OR maintain a list of channels 'opened then closed' and do a garbage run on them every so often
+6) With Motors Disabled, and Dynamic Enabled - a minus 32k error number can slip through the tests in Coast Code.
