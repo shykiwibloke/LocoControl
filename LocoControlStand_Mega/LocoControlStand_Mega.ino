@@ -1,7 +1,7 @@
 /****************************************************
 **                                                 **
 **  Loco Control Stand version                     **/
-#define VERSION "4.2.7"
+#define VERSION "4.2.8"
 /*                                                 **
 **  Written by Chris Draper                        **
 **  Copyright (c) 2016 - 2019                      **
@@ -30,6 +30,9 @@
 //#define LOG_LEVEL_4								//if defined then debug info will be output to the console port
 
 /* Recent Changes Log
+ *  4.2.7
+ 26/12/2019: further throttle refinements
+ 26/12/2019: modify vigilance to lengthen times - esp how long buzzer sounds before brakes at 1 min mark
  *  4.2.7
 16/12/2019: Reduced normal ramping slightly to improve shunting performance.
  *	4.2.6
@@ -280,7 +283,7 @@ void setup(void)
 
   //Start timer - used to check slow controls and heartbeat comms every fifteen seconds
   gtimer.setInterval(10000, DoTenSecondChecks);
-	gtimer.setInterval(250, DoQuarterSecondChecks);
+	gtimer.setInterval(100, DoHundredMillisecondChecks);
 
 }
 
@@ -294,7 +297,7 @@ void setup(void)
 void loop(void)
 {
 	
-  //Read input variables moved to DoQuarterSecondChecks()
+  //Read input variables moved to DoHundredMillisecondChecks()
 
   if (gControlsChanged)           //only process if controls have changed
   {
@@ -506,7 +509,7 @@ void CalcDynBrakeNotchSize(void)
 	
 }
 /***************************************************/
-void DoQuarterSecondChecks(void)
+void DoHundredMillisecondChecks(void)
 {
 	//Stuff that needs to be checked regularly to appear realtime, but also has a debounce component
 
@@ -540,17 +543,17 @@ void DoTenSecondChecks(void)
   {
 		gVigilanceCount++;
     
-		if (gVigilanceCount == 2)  //more than 20 seconds since a control was touched
+		if (gVigilanceCount == 3)  //more than 30 seconds since a control was touched
     {
       Serial.println("L:2:Vigilance Light");
       TriggerVigilanceWarning(false);   //turn light on now (no buzzer
     } 
-		else if (gVigilanceCount == 3)  //light been on for at least 30 seconds - sound buzzer
+		else if (gVigilanceCount == 4)  //light been on for at least 40 seconds - sound buzzer
     {
       Serial.println("L:2:Vigilance Buzzer");
       TriggerVigilanceWarning(true);  //Turn buzzer on
     }
-		else if (gVigilanceCount == 4)  //Buzzer & light been on for at least 40 seconds
+		else if (gVigilanceCount == 6)  //Buzzer & light been on for at least 60 seconds
     {
 			SetMotorRamping(MOTOR_EMG_RAMPING); 		//Ensure we have smooth motor changes if comms reset or motors turned on after arduino
 			SetMotorSpeed(0);
@@ -614,7 +617,7 @@ void SetMotorSpeed(const int newSpeed)
 /***************************************************/
 void SendMotorSound(const int Notch)
 {
-		//Send specified motor sound
+		//Send specified motor sound prefixed with the t for throttle
 	Serial.println("S:t:");					//throttle mode
 	Serial.print("S:");							//Actual Sound command
   Serial.print(Notch);
@@ -624,7 +627,7 @@ void SendMotorSound(const int Notch)
 /***************************************************/
 void SendDynamicSound(const int Notch)
 {
-		//Send specified motor sound
+		//Send specified motor sound prefixed with d for dynamic
 	Serial.println("S:d:");					//dynamic mode
 	Serial.print("S:");							//Actual Sound command
   Serial.print(Notch);
@@ -1250,17 +1253,16 @@ void GetThrottle(void)
 	debounce[0] = debounce[0] - (gThrZeroOffset);     //All the debounce samples are the same so use the first one
 	
 	/*
-	/16/12/2019 - fine tuning on throttle notches as follows:
+	/26/12/2019 - fine tuning on throttle notches as follows:
 	
-	Notch 1 changed from 5 to 4
-	Notch 2 changed from 7 to 6
-	Notch 3 changed from 10 to 9
+	Notch 2 changed from 7 to 8
+	Notch 3 changed from 10 to 11
 	*/
 	
 	if			(debounce[0] > -2) notch = 0;			//Idle					//NB: Values DIFFERENT for Throttle to Dynamic
 	else if (debounce[0] > -5) notch = 1;     //Notch 1
-	else if (debounce[0] > -7) notch = 2;     //Notch 2
-	else if (debounce[0] > -10) notch = 3;    //Notch 3
+	else if (debounce[0] > -8) notch = 2;     //Notch 2
+	else if (debounce[0] > -11) notch = 3;    //Notch 3
 	else if (debounce[0] > -12) notch = 4;    //Notch 4
 	else if (debounce[0] > -15) notch = 5;    //Notch 5
 	else if (debounce[0] > -18) notch = 6;    //Notch 6
