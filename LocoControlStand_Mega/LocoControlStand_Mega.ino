@@ -1,7 +1,7 @@
 /****************************************************
 **                                                 **
 **  Loco Control Stand version                     **/
-#define VERSION "4.2.8"
+#define VERSION "4.2."
 /*                                                 **
 **  Written by Chris Draper                        **
 **  Copyright (c) 2016 - 2019                      **
@@ -30,6 +30,8 @@
 //#define LOG_LEVEL_4								//if defined then debug info will be output to the console port
 
 /* Recent Changes Log
+ *  4.2.8
+ 2/1/2020: removed bug that prevented dynamic brake from functioning.
  *  4.2.7
  26/12/2019: further throttle refinements
  26/12/2019: modify vigilance to lengthen times - esp how long buzzer sounds before brakes at 1 min mark
@@ -375,7 +377,7 @@ void EvaluateState(void)
 				//check if we were in the middle of acceleration to a much higher notch, and cut to wherever we are currently.
 				
 				int currentSpeed = gSabertooth[0].get('M',1);         //Get speed at this exact moment
-				if(currentSpeed = MOTOR_TIMEOUT) currentSpeed = 0;		//Only comes into play when motors are disabled
+				if(currentSpeed == MOTOR_TIMEOUT) currentSpeed = 0;		//Only comes into play when motors are disabled
 				
 				SetMotorSpeed(currentSpeed);			 //and set it as 'high tide' for coasting or dynamic
 				
@@ -553,7 +555,7 @@ void DoTenSecondChecks(void)
       Serial.println("L:2:Vigilance Buzzer");
       TriggerVigilanceWarning(true);  //Turn buzzer on
     }
-		else if (gVigilanceCount == 6)  //Buzzer & light been on for at least 60 seconds
+		else if (gVigilanceCount >= 6)  //Buzzer & light been on for at least 60 seconds
     {
 			SetMotorRamping(MOTOR_EMG_RAMPING); 		//Ensure we have smooth motor changes if comms reset or motors turned on after arduino
 			SetMotorSpeed(0);
